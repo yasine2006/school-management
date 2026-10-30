@@ -220,3 +220,5 @@ Les logos/photos (si utilisés) sont enregistrés dans `uploads/`. Ce dossier es
 - Paiement en ligne
 - Messagerie Prof ↔ Admin
 - Sauvegarde automatique intégrée
+#   s c h o o l - m a n a g e m e n t  
+ 
