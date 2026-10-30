@@ -1,0 +1,327 @@
+generator client {
+  provider   = "prisma-client-js"
+  engineType = "client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  TEACHER
+  STUDENT
+}
+
+enum PayMethod {
+  CASH
+  TRANSFER
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+}
+
+enum StudentStatus {
+  ACTIVE
+  PENDING
+  INACTIVE
+}
+
+enum NotificationChannel {
+  EMAIL
+  WHATSAPP
+  SMS
+  IN_APP
+}
+
+enum EnrollmentStatus {
+  ACTIVE
+  STOPPED
+}
+
+enum GroupKind {
+  REGULAR
+  CONCOURS
+}
+
+// ─── Tenant ────────────────────────────────────────────────────────────────
+model School {
+  id        Int      @id @default(autoincrement())
+  name      String
+  logo      String?
+  phone     String?
+  email     String?
+  address   String?
+  createdAt DateTime @default(now())
+
+  users               User[]
+  levels              Level[]
+  specialties         Specialty[]
+  groups              Group[]
+  students            Student[]
+  registrationPeriods RegistrationPeriod[]
+  auditLogs           AuditLog[]
+  teacherAttendance  TeacherAttendance[]
+}
+
+// ─── Users (admin / teacher / student) ─────────────────────────────────────
+model User {
+  id        Int      @id @default(autoincrement())
+  schoolId  Int
+  name      String
+  email     String   @unique
+  phone     String?
+  password  String
+  role      Role
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  school        School         @relation(fields: [schoolId], references: [id])
+  student       Student?
+  groups        Group[]
+  notifications Notification[]
+  auditLogs            AuditLog[]
+  teacherAttendance   TeacherAttendance[] @relation("TeacherAttendanceTeacher")
+  recordedTeacherAttendance TeacherAttendance[] @relation("TeacherAttendanceRecordedBy")
+
+  @@index([schoolId, role])
+}
+
+// ─── Academic structure: levels, specialties, groups ───────────────────────
+// A level is a school year (Primaire, Collège, 2ème Bac…). A specialty is a
+// subject (Maths, Physique…). A group is one concrete class = specialty × level
+// × teacher, and it is what students actually enroll into.
+model Level {
+  id       Int    @id @default(autoincrement())
+  schoolId Int
+  name     String
+  order    Int    @default(0)
+
+  school School  @relation(fields: [schoolId], references: [id])
+  groups Group[]
+
+  @@unique([schoolId, name])
+}
+
+model Specialty {
+  id       Int     @id @default(autoincrement())
+  schoolId Int
+  name     String
+  color    String?
+
+  school School  @relation(fields: [schoolId], references: [id])
+  groups Group[]
+
+  @@unique([schoolId, name])
+}
+
+model Group {
+  id          Int       @id @default(autoincrement())
+  schoolId    Int
+  specialtyId Int
+  levelId     Int
+  teacherId   Int?
+  name        String
+  kind        GroupKind @default(REGULAR)
+  monthlyFee  Decimal
+  capacity    Int?
+  active      Boolean   @default(true)
+
+  school      School       @relation(fields: [schoolId], references: [id])
+  specialty   Specialty    @relation(fields: [specialtyId], references: [id])
+  level       Level        @relation(fields: [levelId], references: [id])
+  teacher     User?        @relation(fields: [teacherId], references: [id])
+  sessions    Session[]
+  enrollments Enrollment[]
+  attendance  Attendance[]
+
+  @@unique([schoolId, name])
+  @@index([schoolId, specialtyId, levelId])
+}
+
+// Weekly recurring time slot of a group (dayOfWeek 1 = Monday … 7 = Sunday).
+model Session {
+  id        Int     @id @default(autoincrement())
+  groupId   Int
+  dayOfWeek Int
+  startTime String
+  endTime   String
+  room      String?
+
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@index([groupId])
+}
+
+// ─── Students & enrollments (a student may take several specialties) ───────
+model Student {
+  id           Int      @id @default(autoincrement())
+  schoolId     Int
+  userId       Int?     @unique // the student's own login account (role STUDENT)
+  firstName    String
+  lastName     String
+  photo        String?
+  parentName   String?
+  parentPhone  String?
+  parentEmail  String?
+  registeredAt DateTime      @default(now())
+  status       StudentStatus @default(ACTIVE)
+  archived     Boolean       @default(false)
+
+  school      School       @relation(fields: [schoolId], references: [id])
+  user        User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  enrollments Enrollment[]
+  invoices    Invoice[]
+  attendance  Attendance[]
+
+  @@index([schoolId])
+}
+
+// One enrollment = one student in one group (one specialty/level/teacher).
+model Enrollment {
+  id         Int              @id @default(autoincrement())
+  studentId  Int
+  groupId    Int
+  monthlyFee Decimal
+  status     EnrollmentStatus @default(ACTIVE)
+  startedAt  DateTime         @default(now())
+  stoppedAt  DateTime?
+
+  student Student       @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  group   Group         @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  lines   InvoiceLine[]
+
+  @@unique([studentId, groupId])
+  @@index([groupId])
+}
+
+// ─── Finance: one Invoice per student per month, many Payments ─────────────
+// The invoice total is the sum of its lines (one line per enrollment). Billing
+// is per whole month: enrolling late still bills the full month.
+model Invoice {
+  id        Int      @id @default(autoincrement())
+  studentId Int
+  month     DateTime // always the 1st of the month (UTC)
+  dueDate   DateTime
+
+  student  Student       @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  lines    InvoiceLine[]
+  payments Payment[]
+
+  @@unique([studentId, month])
+  @@index([month])
+}
+
+model InvoiceLine {
+  id           Int     @id @default(autoincrement())
+  invoiceId    Int
+  enrollmentId Int?
+  label        String
+  amount       Decimal
+
+  invoice    Invoice     @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  enrollment Enrollment? @relation(fields: [enrollmentId], references: [id])
+  payments   Payment[]
+
+  @@index([invoiceId])
+}
+
+model Payment {
+  id        Int       @id @default(autoincrement())
+  invoiceId Int
+  lineId    Int?
+  amount    Decimal
+  method    PayMethod
+  paidAt    DateTime  @default(now())
+  reference String?
+  receiptNo String?   @unique
+
+  invoice Invoice      @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  line    InvoiceLine? @relation(fields: [lineId], references: [id], onDelete: SetNull)
+
+  @@index([lineId])
+}
+
+// ─── Attendance, notifications, audit ──────────────────────────────────────
+model Attendance {
+  id        Int              @id @default(autoincrement())
+  groupId   Int
+  studentId Int
+  date      DateTime
+  status    AttendanceStatus
+  note      String?
+
+  group   Group   @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, studentId, date])
+  @@index([studentId])
+}
+
+// ─── Registration window ───────────────────────────────────────────────────
+// Open/closed is computed from the dates: no cron job needed.
+model RegistrationPeriod {
+  id        Int      @id @default(autoincrement())
+  schoolId  Int
+  name      String
+  startDate DateTime
+  endDate   DateTime
+  closedAt  DateTime? // admin can close it early
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@index([schoolId, startDate, endDate])
+}
+
+model Notification {
+  id        Int                 @id @default(autoincrement())
+  userId    Int
+  channel   NotificationChannel @default(IN_APP)
+  title     String
+  body      String
+  readAt    DateTime?
+  sentAt    DateTime?
+  createdAt DateTime            @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+}
+
+model AuditLog {
+  id        Int      @id @default(autoincrement())
+  schoolId  Int
+  userId    Int
+  action    String // CREATE | UPDATE | DELETE | LOGIN ...
+  entity    String
+  entityId  Int?
+  details   Json?
+  createdAt DateTime @default(now())
+
+  school School @relation(fields: [schoolId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
+}
+
+model TeacherAttendance {
+  id           Int              @id @default(autoincrement())
+  schoolId     Int
+  teacherId    Int
+  date         DateTime
+  status       AttendanceStatus
+  note         String?
+  recordedById Int?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  school     School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  teacher    User   @relation("TeacherAttendanceTeacher", fields: [teacherId], references: [id], onDelete: Cascade)
+  recordedBy User?  @relation("TeacherAttendanceRecordedBy", fields: [recordedById], references: [id])
+
+  @@unique([teacherId, date])
+  @@index([schoolId, date])
+}
+

@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: school
+          POSTGRES_PASSWORD: school
+          POSTGRES_DB: school
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U school -d school"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://school:school@localhost:5432/school?schema=public
+      AUTH_SECRET: ci-secret-not-used-in-production-000000000000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma migrate deploy
+      - run: npm run db:check
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run build
