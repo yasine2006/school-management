@@ -14,8 +14,20 @@ const features = [
   { icon: HeartHandshake, title: "Toujours", text: "avec vous" },
 ];
 
+function SchoolLogo({ school, size = 44 }: { school: { name: string; logo: string | null }; size?: number }) {
+  if (school.logo) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={school.logo} alt={school.name} style={{ width: size, height: size }} className="shrink-0 rounded-xl bg-white object-contain p-1" />;
+  }
+  return (
+    <span style={{ width: size, height: size }} className="flex shrink-0 items-center justify-center rounded-xl bg-white/10 text-white ring-1 ring-white/20">
+      <BookOpen size={size * 0.5} />
+    </span>
+  );
+}
+
 export default async function LoginPage() {
-  const school = await db.school.findFirst({ select: { name: true } }).catch(() => null);
+  const school = await db.school.findFirst({ select: { name: true, logo: true } }).catch(() => null);
   const name = school?.name ?? "Centre de soutien";
 
   return (
@@ -31,9 +43,7 @@ export default async function LoginPage() {
           }}
         />
         <div className="relative flex items-center gap-3">
-          <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/10 ring-1 ring-white/20">
-            <BookOpen size={22} />
-          </span>
+          <SchoolLogo school={{ name, logo: school?.logo ?? null }} size={44} />
           <div className="leading-tight">
             <p className="font-semibold">{name}</p>
             <p className="text-xs text-slate-300">Centre de soutien</p>
@@ -67,9 +77,13 @@ export default async function LoginPage() {
       <section className="flex items-center justify-center bg-white p-6 sm:p-12">
         <div className="w-full max-w-sm">
           <div className="mb-8 flex flex-col items-center text-center">
-            <span className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-50 text-brand-600">
-              <BookOpen size={28} />
-            </span>
+            {school?.logo ? (
+              <img src={school.logo} alt={name} className="mb-4 h-16 w-16 rounded-2xl bg-white object-contain ring-1 ring-line p-1" />
+            ) : (
+              <span className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-50 text-brand-600">
+                <BookOpen size={28} />
+              </span>
+            )}
             <h2 className="text-xl font-bold">{name}</h2>
             <p className="text-sm text-muted">Centre de soutien</p>
             <p className="mt-6 text-lg font-semibold">Connectez-vous</p>
