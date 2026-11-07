@@ -185,7 +185,16 @@ export default async function LoginPage() {
           <div className="rounded-3xl bg-white p-8 sm:p-10 shadow-xl shadow-slate-200/60 border border-slate-100">
             {/* Top Branding on Card */}
             <div className="mb-7 flex flex-col items-center text-center">
-              <ModernNLogo className="h-12 w-12 mb-3.5" />
+              {school?.logo ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={school.logo}
+                  alt={schoolName}
+                  className="mb-3.5 h-14 w-14 shrink-0 rounded-2xl bg-white p-1.5 object-contain ring-1 ring-slate-200 shadow-sm"
+                />
+              ) : (
+                <ModernNLogo className="h-12 w-12 mb-3.5" />
+              )}
               <h2 className="text-xl font-bold tracking-tight text-slate-900">{schoolName}</h2>
               <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mt-0.5">Centre de soutien</p>
 
