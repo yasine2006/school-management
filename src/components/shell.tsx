@@ -68,18 +68,23 @@ function Sidebar({
   role,
   school,
   user,
+  variant = "dark",
 }: {
   role: "ADMIN" | "TEACHER";
   school: { name: string; logo: string | null };
   user: { name: string; email: string };
+  variant?: "dark" | "blue";
 }) {
+  const bg = variant === "blue"
+    ? "bg-gradient-to-b from-brand-600 to-brand-700 text-blue-50"
+    : "bg-gradient-to-b from-navy-900 to-navy-950 text-slate-300";
   return (
-    <div className="flex h-full flex-col bg-gradient-to-b from-navy-900 to-navy-950 text-slate-300">
+    <div className={`flex h-full flex-col ${bg}`}>
       <div className="flex items-center gap-3 px-5 pb-6 pt-6">
         <SchoolLogo school={school} />
         <div className="min-w-0 leading-tight">
           <p className="truncate font-semibold text-white">{school.name}</p>
-          <p className="text-xs text-slate-400">Centre de soutien</p>
+          <p className="text-xs text-white/70">Centre de soutien</p>
         </div>
       </div>
 
@@ -89,8 +94,8 @@ function Sidebar({
             key={href}
             href={href}
             exact={exact}
-            className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-slate-300 transition hover:bg-white/5 hover:text-white"
-            activeClassName="!bg-brand-600 !text-white shadow-sm"
+            className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-white/80 transition hover:bg-white/10 hover:text-white"
+            activeClassName="!bg-white/20 !text-white shadow-sm"
           >
             <Icon size={18} />
             {label}
@@ -103,11 +108,11 @@ function Sidebar({
           <Avatar name={user.name} size={36} />
           <div className="min-w-0 leading-tight">
             <p className="truncate text-sm font-medium text-white">{user.name}</p>
-            <p className="truncate text-xs text-slate-400">{user.email}</p>
+            <p className="truncate text-xs text-white/70">{user.email}</p>
           </div>
         </div>
         <form action={logout}>
-          <button className="mt-3 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-300 hover:bg-white/5 hover:text-white">
+          <button className="mt-3 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-white/80 hover:bg-white/10 hover:text-white">
             <LogOut size={16} /> Déconnexion
           </button>
         </form>
@@ -138,7 +143,7 @@ export function AppShell({
 
       <header className="sticky top-0 z-20 flex h-16 items-center gap-2 border-b border-line bg-white/90 px-3 backdrop-blur sm:gap-3 sm:px-4 lg:px-8">
         <MobileMenu>
-          <Sidebar role={role} school={school} user={user} />
+          <Sidebar role={role} school={school} user={user} variant="blue" />
         </MobileMenu>
 
         <Link href={role === "ADMIN" ? "/admin" : "/teacher"} className="flex min-w-0 items-center gap-2 lg:hidden">
