@@ -136,13 +136,18 @@ export function AppShell({
         <Sidebar role={role} school={school} user={user} />
       </aside>
 
-      <header className="sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-line bg-white/90 px-4 backdrop-blur lg:px-8">
+      <header className="sticky top-0 z-20 flex h-16 items-center gap-2 border-b border-line bg-white/90 px-3 backdrop-blur sm:gap-3 sm:px-4 lg:px-8">
         <MobileMenu>
           <Sidebar role={role} school={school} user={user} />
         </MobileMenu>
 
+        <Link href={role === "ADMIN" ? "/admin" : "/teacher"} className="flex min-w-0 items-center gap-2 lg:hidden">
+          <SchoolLogo school={school} size={32} />
+          <span className="truncate text-sm font-semibold text-ink">{school.name}</span>
+        </Link>
+
         {role === "ADMIN" ? (
-          <form action="/admin/students" className="relative w-full max-w-md">
+          <form action="/admin/students" className="relative hidden min-w-0 flex-1 sm:block sm:max-w-md">
             <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               name="q"
@@ -151,10 +156,10 @@ export function AppShell({
             />
           </form>
         ) : (
-          <div className="flex-1" />
+          <div className="hidden flex-1 sm:block" />
         )}
 
-        <div className="ml-auto flex items-center gap-4">
+        <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-4">
           {role === "ADMIN" && (
             <Link href="/admin/notifications" aria-label="Notifications" className="relative rounded-lg p-2 text-slate-500 hover:bg-slate-100">
               <Bell size={18} />
@@ -167,7 +172,7 @@ export function AppShell({
           )}
           <div className="flex items-center gap-2.5">
             <Avatar name={user.name} size={34} />
-            <div className="hidden leading-tight sm:block">
+            <div className="hidden leading-tight md:block">
               <p className="text-sm font-medium">{user.name}</p>
               <p className="text-xs text-muted">{roleLabel}</p>
             </div>

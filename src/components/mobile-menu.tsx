@@ -18,22 +18,22 @@ export function MobileMenu({ children }: { children: ReactNode }) {
         type="button"
         aria-label="Ouvrir le menu"
         onClick={() => setOpen(true)}
-        className="flex h-9 w-9 items-center justify-center rounded-lg border border-line bg-white"
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-line bg-white"
       >
         <Menu size={18} />
       </button>
       {open && (
-        <div className="fixed inset-0 z-40 flex">
-          <div className="flex w-72 max-w-[85%] flex-col bg-navy-900">
+        <div className="fixed inset-0 z-50 flex">
+          <div className="relative flex h-full w-72 max-w-[85vw] flex-col bg-navy-900 shadow-xl">
             <button
               type="button"
               aria-label="Fermer le menu"
               onClick={() => setOpen(false)}
-              className="absolute right-3 top-3 z-50 rounded-lg p-2 text-white/80 sm:hidden"
+              className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-lg text-white/80 hover:bg-white/10 hover:text-white"
             >
               <X size={18} />
             </button>
-            {children}
+            <div className="h-full">{children}</div>
           </div>
           <button type="button" aria-label="Fermer" className="flex-1 bg-black/50" onClick={() => setOpen(false)} />
         </div>
