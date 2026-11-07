@@ -76,7 +76,7 @@ function Sidebar({
   variant?: "dark" | "blue";
 }) {
   const bg = variant === "blue"
-    ? "bg-gradient-to-b from-brand-600 to-brand-700 text-blue-50"
+    ? "bg-gradient-to-b from-[#1a56db] via-brand-700 to-[#123a8f] text-blue-50"
     : "bg-gradient-to-b from-navy-900 to-navy-950 text-slate-300";
   return (
     <div className={`flex h-full flex-col ${bg}`}>
@@ -138,7 +138,7 @@ export function AppShell({
   return (
     <div className="min-h-screen lg:pl-64">
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 lg:block">
-        <Sidebar role={role} school={school} user={user} />
+        <Sidebar role={role} school={school} user={user} variant="blue" />
       </aside>
 
       <header className="sticky top-0 z-20 flex h-16 items-center gap-2 border-b border-line bg-white/90 px-3 backdrop-blur sm:gap-3 sm:px-4 lg:px-8">
