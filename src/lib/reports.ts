@@ -83,6 +83,79 @@ export async function buildDataset(schoolId: number, sp: URLSearchParams): Promi
     };
   }
 
+  // Unpaid students from a chosen month up to today, with every useful date shown.
+  if (type === "unpaid") {
+    const sinceDay = parseDay(sp.get("since")) ?? parseDay(sp.get("from"));
+    const since = sinceDay
+      ? new Date(Date.UTC(sinceDay.getUTCFullYear(), sinceDay.getUTCMonth(), 1))
+      : undefined;
+    const until = parseDay(sp.get("to"), true) ?? new Date();
+    const DAY = 86_400_000;
+    const now = new Date();
+
+    const invoices = await db.invoice.findMany({
+      where: {
+        student: studentWhere,
+        ...(since || until
+          ? { month: { ...(since ? { gte: since } : {}), ...(until ? { lte: until } : {}) } }
+          : {}),
+      },
+      include: { lines: true, payments: { orderBy: { paidAt: "desc" } }, student: true },
+      orderBy: [{ month: "desc" }],
+    });
+
+    const rows = invoices
+      .filter((i) => invoiceStatus(i) !== "PAID")
+      .sort(
+        (a, b) =>
+          a.student.lastName.localeCompare(b.student.lastName) || b.month.getTime() - a.month.getTime(),
+      )
+      .map((i) => {
+        const t = invoiceTotals(i);
+        const status = invoiceStatus(i);
+        const lateDays = Math.max(0, Math.floor((now.getTime() - i.dueDate.getTime()) / DAY));
+        const lastPayment = i.payments[0];
+        return [
+          `${i.student.lastName} ${i.student.firstName}`,
+          i.student.parentPhone ?? "—",
+          i.lines.map((l) => l.label).join(", "),
+          formatMonth(i.month),
+          formatDate(i.dueDate),
+          lateDays > 0 ? `${lateDays} j` : "—",
+          t.due,
+          t.paid,
+          t.remaining,
+          statusMeta[status].label,
+          lastPayment ? formatDate(lastPayment.paidAt) : "—",
+        ];
+      });
+
+    return {
+      title: "Élèves non payés",
+      subtitle: [
+        since ? `Depuis le ${formatDate(since)}` : "Toutes les périodes",
+        `Jusqu'au ${formatDate(until)}`,
+        "Factures non totalement réglées",
+      ].join(" · "),
+      head: [
+        "Élève",
+        "Téléphone",
+        "Matières",
+        "Mois",
+        "Échéance",
+        "Retard",
+        "Dû",
+        "Payé",
+        "Reste",
+        "Statut",
+        "Dernier paiement",
+      ],
+      rows,
+      money: [6, 7, 8],
+      slug: "eleves-non-payes",
+    };
+  }
+
   if (type === "receipts") {
     const payments = await db.payment.findMany({
       where: { invoice: { student: studentWhere }, ...(range(from, to) ? { paidAt: range(from, to) } : {}) },

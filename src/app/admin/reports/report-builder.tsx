@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { BookOpen, Check, FileSpreadsheet, FileText, LoaderCircle } from "lucide-react";
 import { formatDH } from "@/lib/format";
 import { Card, selectCls } from "@/components/ui";
@@ -25,16 +25,19 @@ export function ReportBuilder({
   withCols,
   firstCol,
   schoolName,
+  defaultSince,
   initial,
 }: {
   type: string;
   withCols: boolean;
   firstCol: string;
   schoolName: string;
+  defaultSince?: string;
   initial: ReportPreview;
 }) {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  const [since, setSince] = useState(defaultSince ?? "");
   const [status, setStatus] = useState("");
   const [cols, setCols] = useState<Record<string, boolean>>({ groups: true, phone: true, status: true });
   const [preview, setPreview] = useState<ReportPreview>(initial);
@@ -42,14 +45,32 @@ export function ReportBuilder({
   const firstRun = useRef(true);
 
   const isInvoices = type === "invoices";
+  const isUnpaid = type === "unpaid";
   const colsParam = COLS.filter((c) => cols[c.key]).map((c) => c.key).join(",");
 
-  const href = (format: "pdf" | "xlsx", extra?: Record<string, string>) => {
-    const sp = new URLSearchParams({ type, format });
-    if (from) sp.set("from", from);
-    if (to) sp.set("to", to);
+  const todayInput = new Date().toISOString().slice(0, 10);
+  const presetSince = (days: number) => {
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() - days);
+    setSince(d.toISOString().slice(0, 10));
+  };
+
+  const buildParams = useCallback(() => {
+    const sp = new URLSearchParams({ type });
+    if (isUnpaid) {
+      if (since) sp.set("since", since);
+    } else {
+      if (from) sp.set("from", from);
+      if (to) sp.set("to", to);
+    }
     if (isInvoices && status) sp.set("status", status);
     if (withCols) sp.set("cols", colsParam);
+    return sp;
+  }, [type, isUnpaid, since, from, to, isInvoices, status, withCols, colsParam]);
+
+  const href = (format: "pdf" | "xlsx", extra?: Record<string, string>) => {
+    const sp = buildParams();
+    sp.set("format", format);
     for (const [k, v] of Object.entries(extra ?? {})) sp.set(k, v);
     return `/api/reports?${sp}`;
   };
@@ -60,11 +81,7 @@ export function ReportBuilder({
       firstRun.current = false;
       return;
     }
-    const sp = new URLSearchParams({ type });
-    if (from) sp.set("from", from);
-    if (to) sp.set("to", to);
-    if (isInvoices && status) sp.set("status", status);
-    if (withCols) sp.set("cols", colsParam);
+    const sp = buildParams();
 
     const ctrl = new AbortController();
     setPending(true);
@@ -84,7 +101,7 @@ export function ReportBuilder({
       clearTimeout(id);
       ctrl.abort();
     };
-  }, [type, from, to, status, isInvoices, colsParam, withCols]);
+  }, [buildParams]);
 
   return (
     <div className="grid gap-6 lg:grid-cols-2">
@@ -92,19 +109,67 @@ export function ReportBuilder({
         <h2 className="mb-5 font-semibold">{preview.title}</h2>
 
         <div className="space-y-6">
-          <div>
-            <p className="mb-2 text-sm font-medium">Période (optionnel)</p>
-            <div className="flex flex-wrap items-center gap-2">
-              <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="Du" className={selectCls} />
-              <span className="text-muted">→</span>
-              <input type="date" value={to} onChange={(e) => setTo(e.target.value)} aria-label="Au" className={selectCls} />
-              {(from || to) && (
-                <button type="button" onClick={() => { setFrom(""); setTo(""); }} className="text-xs font-medium text-brand-600 hover:underline">
-                  Effacer la période
-                </button>
-              )}
+          {isUnpaid ? (
+            <>
+              <div>
+                <p className="mb-2 text-sm font-medium">Date de début</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    type="date"
+                    value={since}
+                    max={todayInput}
+                    onChange={(e) => setSince(e.target.value)}
+                    aria-label="Depuis le"
+                    className={selectCls}
+                  />
+                  <span className="text-xs text-muted">jusqu&apos;aujourd&apos;hui ({todayInput})</span>
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                  <span className="text-muted">Raccourcis :</span>
+                  <button type="button" onClick={() => presetSince(0)} className="rounded-md bg-slate-100 px-2 py-1 font-medium text-slate-700 hover:bg-slate-200">
+                    Aujourd&apos;hui
+                  </button>
+                  <button type="button" onClick={() => presetSince(30)} className="rounded-md bg-slate-100 px-2 py-1 font-medium text-slate-700 hover:bg-slate-200">
+                    30 derniers jours
+                  </button>
+                  <button type="button" onClick={() => presetSince(90)} className="rounded-md bg-slate-100 px-2 py-1 font-medium text-slate-700 hover:bg-slate-200">
+                    90 derniers jours
+                  </button>
+                  {defaultSince && (
+                    <button type="button" onClick={() => setSince(defaultSince)} className="rounded-md bg-slate-100 px-2 py-1 font-medium text-slate-700 hover:bg-slate-200">
+                      1er du mois
+                    </button>
+                  )}
+                  {since && (
+                    <button type="button" onClick={() => setSince("")} className="font-medium text-brand-600 hover:underline">
+                      Tout afficher
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="rounded-xl bg-rose-50 p-4 ring-1 ring-rose-100">
+                <p className="text-sm font-semibold text-rose-700">Tous les impayés, avec toutes les dates</p>
+                <p className="mt-0.5 text-xs leading-relaxed text-rose-600/80">
+                  Liste des élèves dont la facture n&apos;est pas totalement réglée depuis la date choisie. Chaque ligne affiche : élève, téléphone, matières, début et fin du cycle, échéance, retard, montants, statut et date du dernier paiement. Rien n&apos;est masqué.
+                </p>
+              </div>
+            </>
+          ) : (
+            <div>
+              <p className="mb-2 text-sm font-medium">Période (optionnel)</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="Du" className={selectCls} />
+                <span className="text-muted">→</span>
+                <input type="date" value={to} onChange={(e) => setTo(e.target.value)} aria-label="Au" className={selectCls} />
+                {(from || to) && (
+                  <button type="button" onClick={() => { setFrom(""); setTo(""); }} className="text-xs font-medium text-brand-600 hover:underline">
+                    Effacer la période
+                  </button>
+                )}
+              </div>
             </div>
-          </div>
+          )}
 
           {isInvoices && (
             <>

@@ -4,7 +4,7 @@ import { FileText } from "lucide-react";
 import { db } from "@/lib/db";
 import { requireRole } from "@/lib/session";
 import { buildDataset } from "@/lib/reports";
-import { formatDate, formatDH } from "@/lib/format";
+import { formatDate, formatDH, toInputDate } from "@/lib/format";
 import { Card, PageHeader, td, th } from "@/components/ui";
 import { ReportBuilder } from "./report-builder";
 
@@ -14,6 +14,7 @@ const TABS = [
   { key: "students", label: "Élèves" },
   { key: "enrollments", label: "Inscriptions" },
   { key: "invoices", label: "État des paiements" },
+  { key: "unpaid", label: "Impayés depuis" },
   { key: "receipts", label: "Factures / Reçus" },
 ] as const;
 
@@ -21,10 +22,15 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
   const { schoolId } = await requireRole("ADMIN");
   const { tab: tabParam } = await searchParams;
   const tab = TABS.find((t) => t.key === tabParam) ?? TABS[0];
+  const today = new Date();
+  const defaultSince = toInputDate(new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1)));
 
   const [school, preview, recent] = await Promise.all([
     db.school.findUniqueOrThrow({ where: { id: schoolId }, select: { name: true, logo: true } }),
-    buildDataset(schoolId, new URLSearchParams({ type: tab.key })),
+    buildDataset(
+      schoolId,
+      new URLSearchParams(tab.key === "unpaid" ? { type: tab.key, since: defaultSince } : { type: tab.key }),
+    ),
     tab.key === "receipts"
       ? db.payment.findMany({
           where: { invoice: { student: { schoolId } } },
@@ -57,6 +63,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         withCols={tab.key === "students"}
         firstCol="Liste des élèves"
         schoolName={school.name}
+        defaultSince={defaultSince}
         initial={{
           title: preview.title,
           subtitle: preview.subtitle ?? null,
