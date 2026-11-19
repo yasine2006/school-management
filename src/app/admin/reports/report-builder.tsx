@@ -151,7 +151,7 @@ export function ReportBuilder({
               <div className="rounded-xl bg-rose-50 p-4 ring-1 ring-rose-100">
                 <p className="text-sm font-semibold text-rose-700">Tous les impayés, avec toutes les dates</p>
                 <p className="mt-0.5 text-xs leading-relaxed text-rose-600/80">
-                  Liste des élèves dont la facture n&apos;est pas totalement réglée depuis la date choisie. Chaque ligne affiche : élève, téléphone, matières, début et fin du cycle, échéance, retard, montants, statut et date du dernier paiement. Rien n&apos;est masqué.
+                  Liste des élèves dont la facture n&apos;est pas totalement réglée depuis la date choisie. Chaque ligne affiche : élève, date d&apos;inscription, dernière inscription, téléphone, matières, mois, échéance, retard, montants, statut et date du dernier paiement. Rien n&apos;est masqué.
                 </p>
               </div>
             </>

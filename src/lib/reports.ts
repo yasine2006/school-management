@@ -100,7 +100,11 @@ export async function buildDataset(schoolId: number, sp: URLSearchParams): Promi
           ? { month: { ...(since ? { gte: since } : {}), ...(until ? { lte: until } : {}) } }
           : {}),
       },
-      include: { lines: true, payments: { orderBy: { paidAt: "desc" } }, student: true },
+      include: {
+        lines: { include: { enrollment: true } },
+        payments: { orderBy: { paidAt: "desc" } },
+        student: true,
+      },
       orderBy: [{ month: "desc" }],
     });
 
@@ -115,8 +119,14 @@ export async function buildDataset(schoolId: number, sp: URLSearchParams): Promi
         const status = invoiceStatus(i);
         const lateDays = Math.max(0, Math.floor((now.getTime() - i.dueDate.getTime()) / DAY));
         const lastPayment = i.payments[0];
+        const enrolled = i.lines
+          .map((l) => l.enrollment?.startedAt)
+          .filter((d): d is Date => Boolean(d))
+          .sort((a, b) => a.getTime() - b.getTime());
         return [
           `${i.student.lastName} ${i.student.firstName}`,
+          enrolled[0] ? formatDate(enrolled[0]) : "—",
+          enrolled.length ? formatDate(enrolled[enrolled.length - 1]!) : "—",
           i.student.parentPhone ?? "—",
           i.lines.map((l) => l.label).join(", "),
           formatMonth(i.month),
@@ -136,9 +146,12 @@ export async function buildDataset(schoolId: number, sp: URLSearchParams): Promi
         since ? `Depuis le ${formatDate(since)}` : "Toutes les périodes",
         `Jusqu'au ${formatDate(until)}`,
         "Factures non totalement réglées",
+        "Dates d'inscription affichées",
       ].join(" · "),
       head: [
         "Élève",
+        "Inscription",
+        "Dernière inscription",
         "Téléphone",
         "Matières",
         "Mois",
@@ -151,7 +164,7 @@ export async function buildDataset(schoolId: number, sp: URLSearchParams): Promi
         "Dernier paiement",
       ],
       rows,
-      money: [6, 7, 8],
+      money: [8, 9, 10],
       slug: "eleves-non-payes",
     };
   }
