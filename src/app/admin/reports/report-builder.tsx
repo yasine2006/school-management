@@ -396,6 +396,17 @@ export function ReportBuilder({
                     </button>
                     <button
                       type="button"
+                      onClick={() => { setMonths("year"); setFrom(""); }}
+                      className={`rounded-lg px-2 py-1.5 text-xs font-medium transition text-left border ${
+                        months === "year" && !from
+                          ? "bg-brand-600 text-white border-brand-600 shadow-xs"
+                          : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100"
+                      }`}
+                    >
+                      Année complète
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => { setMonths("all"); setFrom(""); }}
                       className={`rounded-lg px-2 py-1.5 text-xs font-medium transition text-left border ${
                         months === "all" && !from
@@ -413,7 +424,9 @@ export function ReportBuilder({
                         ? "Mois sélectionné + le mois d'avant uniquement."
                         : months === "3"
                           ? "Prend les 3 derniers mois jusqu'à la date sélectionnée."
-                          : "Prend l'ensemble des mois sans limite d'historique."}
+                          : months === "year"
+                            ? "Toute l'année sélectionnée (janvier → date d'arrêté)."
+                            : "Prend l'ensemble des mois sans limite d'historique."}
                   </p>
                 </div>
 

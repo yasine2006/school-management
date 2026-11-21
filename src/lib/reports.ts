@@ -184,6 +184,9 @@ export async function buildDataset(schoolId: number, sp: URLSearchParams): Promi
       minMonth = new Date(Date.UTC(maxMonth.getUTCFullYear(), maxMonth.getUTCMonth() - 1, 1));
     } else if (monthsParam === "3") {
       minMonth = new Date(Date.UTC(maxMonth.getUTCFullYear(), maxMonth.getUTCMonth() - 2, 1));
+    } else if (monthsParam === "year") {
+      // Full current year: January 1st of the selected year → asOf month
+      minMonth = new Date(Date.UTC(maxMonth.getUTCFullYear(), 0, 1));
     } else if (monthsParam === "all") {
       minMonth = undefined; // all past months
     } else {
@@ -349,7 +352,9 @@ export async function buildDataset(schoolId: number, sp: URLSearchParams): Promi
     const windowText = minMonth
       ? minMonth.getTime() === maxMonth.getTime()
         ? `Mois de ${formatMonth(maxMonth)} uniquement`
-        : `Depuis ${formatMonth(minMonth)} → ${formatMonth(maxMonth)}`
+        : minMonth.getUTCMonth() === 0
+          ? `Année ${minMonth.getUTCFullYear()} (depuis janvier)`
+          : `Depuis ${formatMonth(minMonth)} → ${formatMonth(maxMonth)}`
       : "Tout l'historique";
 
     return {
