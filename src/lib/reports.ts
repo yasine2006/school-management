@@ -161,9 +161,8 @@ export async function buildDataset(schoolId: number, sp: URLSearchParams): Promi
 
   // ── 2. Élèves non payés / Impayés cumulés (Unpaid) ───────────────────────────
   // Business rule: Shows unpaid students up to a cut-off date (asOf/to).
-  // Window: Restricted by default to maximum 2 months (the selected month + 1 month before).
-  // E.g., if admin filters on 10/11, it fetches October and November unpaid invoices.
-  // It avoids pulling an entire 12-month backlog unless explicitly requested.
+  // Window: By default the FULL history is included so all unpaid students appear.
+  // Admins may explicitly narrow the window via `months` (1, 2, 3) or `since`/`from`.
   if (type === "unpaid") {
     const asOfParam = sp.get("asOf") || sp.get("to");
     const asOfDate = parseDay(asOfParam, true) ?? new Date();
@@ -171,24 +170,24 @@ export async function buildDataset(schoolId: number, sp: URLSearchParams): Promi
     const fromParam = sp.get("since") || sp.get("from");
     const fromDay = parseDay(fromParam);
 
-    const monthsParam = sp.get("months") ?? "2";
+    const monthsParam = sp.get("months") ?? "all";
 
     // Upper bound month: 1st of the month of the asOfDate
     const maxMonth = new Date(Date.UTC(asOfDate.getUTCFullYear(), asOfDate.getUTCMonth(), 1));
 
-    // Lower bound month: default maximum 2 months (current + previous)
+    // Lower bound month: full history unless the admin explicitly narrows it
     let minMonth: Date | undefined;
     if (fromDay) {
       minMonth = new Date(Date.UTC(fromDay.getUTCFullYear(), fromDay.getUTCMonth(), 1));
     } else if (monthsParam === "1") {
       minMonth = maxMonth;
+    } else if (monthsParam === "2") {
+      minMonth = new Date(Date.UTC(maxMonth.getUTCFullYear(), maxMonth.getUTCMonth() - 1, 1));
     } else if (monthsParam === "3") {
       minMonth = new Date(Date.UTC(maxMonth.getUTCFullYear(), maxMonth.getUTCMonth() - 2, 1));
-    } else if (monthsParam === "all") {
-      minMonth = undefined; // all past months
     } else {
-      // Default: maximum 2 months (mois en cours + mois précédent)
-      minMonth = new Date(Date.UTC(maxMonth.getUTCFullYear(), maxMonth.getUTCMonth() - 1, 1));
+      // Default: all past months (no lower bound)
+      minMonth = undefined;
     }
 
     const invoices = await db.invoice.findMany({
