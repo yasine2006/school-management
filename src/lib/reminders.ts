@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { invoiceTotals } from "@/lib/fees";
 import { formatDH, formatMonth } from "@/lib/format";
 import { billableEnrollments, monthKey, monthStart } from "@/lib/invoicing";
+import { enrollmentAnchor, lateDaysFromEnrollment } from "@/lib/late-days";
 
 export const REMINDER_TITLE = "Rappel de paiement";
 
@@ -27,7 +28,6 @@ export type ReminderRow = {
   waHref: string | null;
 };
 
-const DAY = 86_400_000;
 const startOfDay = (d = new Date()) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
 
 function normalizePhone(raw: string | null) {
@@ -87,7 +87,6 @@ export async function reminderRows(schoolId: number, month: Date): Promise<Remin
     if (log.createdAt >= sod) today.add(log.entityId);
   }
 
-  const fallbackDue = new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth(), 5));
   const now = new Date();
 
   return students.map((s) => {
@@ -106,16 +105,9 @@ export async function reminderRows(schoolId: number, month: Date): Promise<Remin
         : paid > 0
           ? "PARTIAL"
           : "UNPAID";
-    // Never due before enrollment + 5 days (a late enrollment must not be
-    // flagged as overdue from the 5th of the month).
-    const firstStart = s.enrollments.reduce<Date | null>(
-      (min, e) => (min === null || e.startedAt < min ? e.startedAt : min),
-      null,
-    );
-    const afterEnrollment = firstStart ? new Date(firstStart.getTime() + 5 * DAY) : null;
-    const baseDue = invoice?.dueDate ?? fallbackDue;
-    const dueDate = afterEnrollment && afterEnrollment > baseDue ? afterEnrollment : baseDue;
-    const daysLate = remaining > 0 ? Math.max(0, Math.floor((now.getTime() - dueDate.getTime()) / DAY)) : 0;
+    // Échéance = inscription + 5 j ; retard = jours depuis l'inscription à partir du 6e jour.
+    const start = enrollmentAnchor(s.enrollments);
+    const daysLate = remaining > 0 && start ? lateDaysFromEnrollment(start, now) : 0;
     const remindedAt = invoice ? (lastReminder.get(invoice.id) ?? null) : null;
     const phone = normalizePhone(s.parentPhone);
 

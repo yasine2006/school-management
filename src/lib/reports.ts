@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { studentSearchWhere } from "@/lib/search";
 import { invoiceStatus, invoiceTotals, statusMeta } from "@/lib/fees";
 import { formatDate, formatMonth } from "@/lib/format";
+import { dueDateFromEnrollment, enrollmentAnchor, lateDaysFromEnrollment } from "@/lib/late-days";
 
 export type ReportSummary = {
   totalDue: number;
@@ -233,16 +234,15 @@ export async function buildDataset(schoolId: number, sp: URLSearchParams): Promi
 
     const DAY = 86_400_000;
 
-    // Business rule: an invoice is never due before enrollment + 5 days,
-    // even if its stored dueDate is the 5th of the month (older invoices).
+    // Règle métier : échéance = date d'inscription + 5 jours ; le retard est
+    // compté depuis l'inscription et affiché à partir du 6e jour (6, 7, 8, …).
     const effectiveDue = (baseDue: Date, enrollments: { startedAt: Date }[]) => {
-      if (!enrollments.length) return baseDue;
-      const firstStart = enrollments.reduce(
-        (min, e) => (e.startedAt.getTime() < min.getTime() ? e.startedAt : min),
-        enrollments[0].startedAt,
-      );
-      const afterEnrollment = new Date(firstStart.getTime() + 5 * DAY);
-      return afterEnrollment > baseDue ? afterEnrollment : baseDue;
+      const start = enrollmentAnchor(enrollments);
+      return start ? dueDateFromEnrollment(start) : baseDue;
+    };
+    const lateOf = (baseDue: Date, enrollments: { startedAt: Date }[], fallback?: Date) => {
+      const start = enrollmentAnchor(enrollments) ?? fallback ?? null;
+      return start ? lateDaysFromEnrollment(start, asOfDate) : Math.floor((asOfDate.getTime() - baseDue.getTime()) / DAY);
     };
 
     const fallbackDue = new Date(Date.UTC(maxMonth.getUTCFullYear(), maxMonth.getUTCMonth(), 5));
@@ -277,7 +277,7 @@ export async function buildDataset(schoolId: number, sp: URLSearchParams): Promi
         if (!s.invoices.length && expected > 0) {
           const due = effectiveDue(fallbackDue, s.enrollments);
           if (due.getTime() <= asOfDate.getTime()) {
-            const lateDays = Math.floor((asOfDate.getTime() - due.getTime()) / DAY);
+            const lateDays = lateOf(fallbackDue, s.enrollments, s.registeredAt);
             entries.push({
               studentId: s.id,
               name: `${s.lastName} ${s.firstName}`,
@@ -302,7 +302,7 @@ export async function buildDataset(schoolId: number, sp: URLSearchParams): Promi
         const t = invoiceTotals(i);
         const status = invoiceStatus(i);
         const due = effectiveDue(i.dueDate, s.enrollments);
-        const lateDays = Math.floor((asOfDate.getTime() - due.getTime()) / DAY);
+        const lateDays = lateOf(i.dueDate, s.enrollments, s.registeredAt);
         const subjectOrGroup =
           i.lines.map((l) => l.enrollment?.group?.name ?? l.label).filter(Boolean).join(", ") || allGroups;
         const lastPayment = i.payments[0];

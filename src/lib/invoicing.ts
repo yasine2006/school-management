@@ -1,6 +1,7 @@
 import "server-only";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
+import { dueDateFromEnrollment, enrollmentAnchor } from "@/lib/late-days";
 
 export const MAX_BILLING_MONTHS = 12;
 
@@ -50,12 +51,9 @@ export async function ensureInvoiceForMonth(
   const active = billableEnrollments(enrollments, month);
   if (!active.length) return null;
 
-  // Due date = 5th of the month, but NEVER before enrollment + 5 days.
-  // A student enrolled on the 19th must not be 16 days late on the 5th.
-  const firstStart = active.reduce((min, e) => (e.startedAt < min ? e.startedAt : min), active[0].startedAt);
-  const monthFifth = new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth(), 5));
-  const afterEnrollment = new Date(firstStart.getTime() + 5 * 86_400_000);
-  const dueDate = afterEnrollment > monthFifth ? afterEnrollment : monthFifth;
+  // Échéance = date d'inscription + 5 jours (jamais avant l'inscription).
+  const start = enrollmentAnchor(active) ?? active[0].startedAt;
+  const dueDate = dueDateFromEnrollment(start);
 
   return tx.invoice
     .create({
