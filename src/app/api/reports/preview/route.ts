@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { buildDataset } from "@/lib/reports";
 
-/** Lightweight JSON preview used by the report builder (8 first rows + total count). */
+/** Lightweight JSON preview used by the report builder (8 first rows + total count + summary KPIs). */
 export async function GET(req: NextRequest) {
   const session = await getSession();
   if (!session) return Response.json({ error: "Non authentifié" }, { status: 401 });
@@ -14,9 +14,10 @@ export async function GET(req: NextRequest) {
       title: ds.title,
       subtitle: ds.subtitle ?? null,
       head: ds.head,
-      rows: ds.rows.slice(0, 8),
+      rows: ds.rows.slice(0, 10),
       total: ds.rows.length,
       money: ds.money,
+      summary: ds.summary ?? null,
     },
     { headers: { "Cache-Control": "private, no-store" } },
   );

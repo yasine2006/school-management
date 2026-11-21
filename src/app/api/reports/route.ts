@@ -22,35 +22,105 @@ export async function GET(req: NextRequest) {
     "Cache-Control": "private, no-store",
   });
 
-  await audit(session, "EXPORT", "Report", undefined, { type: sp.get("type") ?? "students", format, rows: ds.rows.length });
+  await audit(session, "EXPORT", "Report", undefined, {
+    type: sp.get("type") ?? "students",
+    format,
+    rows: ds.rows.length,
+    groupId: sp.get("groupId") ?? undefined,
+  });
 
   if (format === "pdf") {
     const school = await db.school.findUniqueOrThrow({ where: { id: session.schoolId } });
     const money = new Set(ds.money);
+
+    const kpis =
+      ds.summary && ds.summary.totalDue > 0
+        ? [
+            { label: "Total Dû", value: formatDH(ds.summary.totalDue) },
+            { label: "Total Encaissé", value: formatDH(ds.summary.totalPaid) },
+            { label: "Reste à Recouvrer", value: formatDH(ds.summary.totalRemaining) },
+            { label: "Taux Recouvrement", value: `${ds.summary.recoveryRate}%` },
+            { label: "Total Dossiers", value: `${ds.summary.totalCount}` },
+          ]
+        : undefined;
+
     const pdf = tablePdf({
       school,
       title: ds.title,
       subtitle: ds.subtitle,
       head: ds.head,
       body: ds.rows.map((r) => r.map((v, i) => (money.has(i) ? formatDH(Number(v)) : String(v)))),
+      kpis,
     });
     return new Response(new Uint8Array(pdf), { headers: headers("application/pdf") });
   }
 
+  // Excel Export
   const wb = new ExcelJS.Workbook();
-  const ws = wb.addWorksheet(ds.title.slice(0, 31));
-  ws.addRow(ds.head);
-  ds.rows.forEach((r) => ws.addRow(r));
+  wb.creator = "Centre Excellence";
+  wb.created = new Date();
 
-  const header = ws.getRow(1);
-  header.font = { bold: true, color: { argb: "FFFFFFFF" } };
+  const ws = wb.addWorksheet(ds.title.slice(0, 31));
+
+  // Title block in Excel
+  ws.addRow([ds.title]);
+  ws.getRow(1).font = { bold: true, size: 14, color: { argb: "FF071432" } };
+
+  if (ds.subtitle) {
+    ws.addRow([ds.subtitle]);
+    ws.getRow(2).font = { italic: true, size: 9, color: { argb: "FF6B7A93" } };
+  } else {
+    ws.addRow([]);
+  }
+
+  // Optional summary KPIs in Excel
+  if (ds.summary && ds.summary.totalDue > 0) {
+    ws.addRow([
+      `Total Dû: ${ds.summary.totalDue.toFixed(2)} DH`,
+      `Total Encaissé: ${ds.summary.totalPaid.toFixed(2)} DH`,
+      `Reste à Recouvrer: ${ds.summary.totalRemaining.toFixed(2)} DH`,
+      `Recouvrement: ${ds.summary.recoveryRate}%`,
+      `Lignes: ${ds.summary.totalCount}`,
+    ]);
+    const kpiRow = ws.getRow(3);
+    kpiRow.font = { bold: true, size: 9.5, color: { argb: "FF071432" } };
+    kpiRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFEBF1FD" } };
+    ws.addRow([]); // empty row separator
+  } else {
+    ws.addRow([]);
+  }
+
+  // Header row index
+  const headerRowIdx = ws.rowCount + 1;
+  ws.addRow(ds.head);
+
+  const header = ws.getRow(headerRowIdx);
+  header.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 10 };
   header.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0B1B3B" } };
-  ws.columns.forEach((col, i) => {
-    const longest = Math.max(ds.head[i]!.length, ...ds.rows.map((r) => String(r[i] ?? "").length));
-    col.width = Math.min(Math.max(longest + 3, 10), 40);
-    if (ds.money.includes(i)) col.numFmt = '#,##0.00 "DH"';
+  header.alignment = { vertical: "middle" };
+
+  // Data rows
+  ds.rows.forEach((r, idx) => {
+    const row = ws.addRow(r);
+    if (idx % 2 === 1) {
+      row.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF8FAFC" } };
+    }
   });
-  ws.views = [{ state: "frozen", ySplit: 1 }];
+
+  // Formatting and auto-width
+  ws.columns.forEach((col, i) => {
+    const longest = Math.max(
+      ds.head[i]?.length ?? 10,
+      ...ds.rows.map((r) => String(r[i] ?? "").length),
+    );
+    col.width = Math.min(Math.max(longest + 4, 12), 40);
+    if (ds.money.includes(i)) {
+      col.numFmt = '#,##0.00 "DH"';
+    }
+  });
+
+  // Freeze header row
+  ws.views = [{ state: "frozen", ySplit: headerRowIdx }];
 
   const buf = await wb.xlsx.writeBuffer();
   return new Response(new Uint8Array(buf as ArrayBuffer), {

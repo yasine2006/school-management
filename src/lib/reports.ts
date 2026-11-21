@@ -4,6 +4,17 @@ import { db } from "@/lib/db";
 import { studentSearchWhere } from "@/lib/search";
 import { invoiceStatus, invoiceTotals, statusMeta } from "@/lib/fees";
 import { formatDate, formatMonth } from "@/lib/format";
+import { generateMissingInvoices } from "@/lib/invoicing";
+
+export type ReportSummary = {
+  totalDue: number;
+  totalPaid: number;
+  totalRemaining: number;
+  recoveryRate: number;
+  totalCount: number;
+  lateCount?: number;
+  uniqueStudents?: number;
+};
 
 export type Dataset = {
   title: string;
@@ -13,20 +24,27 @@ export type Dataset = {
   /** column indexes holding money amounts (formatted as DH in PDF, kept numeric in Excel) */
   money: number[];
   slug: string;
+  summary?: ReportSummary;
 };
 
 const parseDay = (v: string | null, end = false) =>
   v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? new Date(`${v}T${end ? "23:59:59.999" : "00:00:00.000"}Z`) : undefined;
 
-const range = (from?: Date, to?: Date) => (from || to ? { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } : undefined);
+const range = (from?: Date, to?: Date) =>
+  from || to ? { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } : undefined;
 
 const periodLabel = (sp: URLSearchParams) => {
   const f = sp.get("from");
   const t = sp.get("to");
-  return f || t ? `Période : ${f ? formatDate(`${f}T00:00:00Z`) : "…"} → ${t ? formatDate(`${t}T00:00:00Z`) : "…"}` : undefined;
+  const asOf = sp.get("asOf");
+  if (asOf) return `Arrêté au : ${formatDate(`${asOf}T00:00:00Z`)}`;
+  if (f || t) {
+    return `Période : ${f ? formatDate(`${f}T00:00:00Z`) : "Origine"} → ${t ? formatDate(`${t}T00:00:00Z`) : "Aujourd'hui"}`;
+  }
+  return undefined;
 };
 
-const methodLabel = (m: string) => (m === "CASH" ? "Cash" : "Virement");
+const methodLabel = (m: string) => (m === "CASH" ? "Espèces" : "Virement");
 
 export async function buildDataset(schoolId: number, sp: URLSearchParams): Promise<Dataset> {
   const type = sp.get("type") ?? "students";
@@ -35,6 +53,16 @@ export async function buildDataset(schoolId: number, sp: URLSearchParams): Promi
   const q = sp.get("q") || undefined;
   const groupId = Number(sp.get("groupId")) || undefined;
   const specialtyId = Number(sp.get("specialtyId")) || undefined;
+
+  // Resolve group label for subtitles
+  let groupLabel: string | undefined;
+  if (groupId) {
+    const grp = await db.group.findUnique({
+      where: { id: groupId },
+      select: { name: true, specialty: { select: { name: true } }, level: { select: { name: true } } },
+    });
+    if (grp) groupLabel = `Groupe : ${grp.name} (${grp.level.name})`;
+  }
 
   const studentWhere: Prisma.StudentWhereInput = {
     schoolId,
@@ -45,116 +73,213 @@ export async function buildDataset(schoolId: number, sp: URLSearchParams): Promi
       : {}),
   };
 
+  // ── 1. État des factures (Invoices) ──────────────────────────────────────────
   if (type === "invoices") {
     const status = sp.get("status");
     const unpaidOnly = sp.get("unpaid") === "1";
+
     const invoices = await db.invoice.findMany({
       where: {
         student: studentWhere,
         ...(range(from, to) ? { month: range(from, to) } : {}),
-      },
-      include: { lines: true, payments: { orderBy: { paidAt: "desc" } }, student: true },
-      orderBy: [{ month: "desc" }],
-    });
-
-    const rows = invoices
-      .filter((i) => (!status || invoiceStatus(i) === status) && (!unpaidOnly || invoiceStatus(i) !== "PAID"))
-      .sort((a, b) => b.month.getTime() - a.month.getTime() || a.student.lastName.localeCompare(b.student.lastName))
-      .map((i) => {
-        const t = invoiceTotals(i);
-        return [
-          `${i.student.lastName} ${i.student.firstName}`,
-          i.lines.map((l) => l.label).join(", "),
-          formatMonth(i.month),
-          t.due,
-          t.paid,
-          t.remaining,
-          statusMeta[invoiceStatus(i)].label,
-        ];
-      });
-
-    return {
-      title: unpaidOnly ? "Factures impayées" : "État des factures",
-      subtitle: [periodLabel(sp), unpaidOnly ? "Factures non totalement payées" : undefined].filter(Boolean).join(" · ") || undefined,
-      head: ["Élève", "Matières", "Mois", "Dû", "Payé", "Reste", "Statut"],
-      rows,
-      money: [3, 4, 5],
-      slug: unpaidOnly ? "factures-impayees" : "etat-des-factures",
-    };
-  }
-
-  // Unpaid students from a chosen month up to today, with every useful date shown.
-  if (type === "unpaid") {
-    const sinceDay = parseDay(sp.get("since")) ?? parseDay(sp.get("from"));
-    const since = sinceDay
-      ? new Date(Date.UTC(sinceDay.getUTCFullYear(), sinceDay.getUTCMonth(), 1))
-      : undefined;
-    const until = parseDay(sp.get("to"), true) ?? new Date();
-    const DAY = 86_400_000;
-    const now = new Date();
-
-    const invoices = await db.invoice.findMany({
-      where: {
-        student: studentWhere,
-        ...(since || until
-          ? { month: { ...(since ? { gte: since } : {}), ...(until ? { lte: until } : {}) } }
-          : {}),
+        ...(groupId ? { lines: { some: { enrollment: { groupId } } } } : {}),
       },
       include: {
-        lines: { include: { enrollment: true } },
+        lines: { include: { enrollment: { include: { group: true } } } },
         payments: { orderBy: { paidAt: "desc" } },
         student: true,
       },
       orderBy: [{ month: "desc" }],
     });
 
-    const rows = invoices
-      .filter((i) => invoiceStatus(i) !== "PAID")
-      .sort(
-        (a, b) =>
-          a.student.lastName.localeCompare(b.student.lastName) || b.month.getTime() - a.month.getTime(),
-      )
-      .map((i) => {
-        const t = invoiceTotals(i);
-        const status = invoiceStatus(i);
-        const lateDays = Math.max(0, Math.floor((now.getTime() - i.dueDate.getTime()) / DAY));
-        const lastPayment = i.payments[0];
-        const enrolled = i.lines
-          .map((l) => l.enrollment?.startedAt)
-          .filter((d): d is Date => Boolean(d))
-          .sort((a, b) => a.getTime() - b.getTime());
-        return [
-          `${i.student.lastName} ${i.student.firstName}`,
-          enrolled[0] ? formatDate(enrolled[0]) : "—",
-          enrolled.length ? formatDate(enrolled[enrolled.length - 1]!) : "—",
-          i.student.parentPhone ?? "—",
-          i.lines.map((l) => l.label).join(", "),
-          formatMonth(i.month),
-          formatDate(i.dueDate),
-          lateDays > 0 ? `${lateDays} j` : "—",
-          t.due,
-          t.paid,
-          t.remaining,
-          statusMeta[status].label,
-          lastPayment ? formatDate(lastPayment.paidAt) : "—",
-        ];
-      });
+    const now = new Date();
+    const DAY = 86_400_000;
+
+    const filtered = invoices.filter(
+      (i) => (!status || invoiceStatus(i) === status) && (!unpaidOnly || invoiceStatus(i) !== "PAID"),
+    );
+
+    filtered.sort(
+      (a, b) => b.month.getTime() - a.month.getTime() || a.student.lastName.localeCompare(b.student.lastName),
+    );
+
+    let sumDue = 0;
+    let sumPaid = 0;
+    let sumRemaining = 0;
+    let lateCount = 0;
+
+    const rows = filtered.map((i) => {
+      const t = invoiceTotals(i);
+      const st = invoiceStatus(i);
+      const lateDays = Math.max(0, Math.floor((now.getTime() - i.dueDate.getTime()) / DAY));
+      if (st !== "PAID" && lateDays > 0) lateCount++;
+
+      sumDue += t.due;
+      sumPaid += t.paid;
+      sumRemaining += t.remaining;
+
+      const groupNames = i.lines
+        .map((l) => l.enrollment?.group?.name ?? l.label)
+        .filter(Boolean)
+        .join(", ");
+
+      return [
+        `${i.student.lastName} ${i.student.firstName}`,
+        i.student.parentPhone ?? "—",
+        groupNames || "—",
+        formatMonth(i.month),
+        formatDate(i.dueDate),
+        st !== "PAID" && lateDays > 0 ? `${lateDays} j` : "—",
+        t.due,
+        t.paid,
+        t.remaining,
+        statusMeta[st].label,
+      ];
+    });
+
+    const recoveryRate = sumDue > 0 ? Math.round((sumPaid / sumDue) * 1000) / 10 : 100;
 
     return {
-      title: "Élèves non payés",
+      title: unpaidOnly ? "Factures impayées" : "État des paiements",
+      subtitle: [groupLabel, periodLabel(sp), unpaidOnly ? "Factures avec solde restant dû" : undefined]
+        .filter(Boolean)
+        .join(" · ") || undefined,
+      head: ["Élève", "Téléphone", "Groupe(s)", "Mois", "Échéance", "Retard", "Dû", "Payé", "Reste", "Statut"],
+      rows,
+      money: [6, 7, 8],
+      slug: unpaidOnly ? "factures-impayees" : "etat-des-factures",
+      summary: {
+        totalDue: sumDue,
+        totalPaid: sumPaid,
+        totalRemaining: sumRemaining,
+        recoveryRate,
+        totalCount: rows.length,
+        lateCount,
+        uniqueStudents: new Set(filtered.map((i) => i.studentId)).size,
+      },
+    };
+  }
+
+  // ── 2. Élèves non payés / Impayés cumulés (Unpaid) ───────────────────────────
+  // Business rule: Shows all students with unpaid amounts up to the specified cut-off date (asOf/to).
+  // E.g., if student enrolled on 05/10 and admin filters on 10/11, their October and November unpaid
+  // balances appear seamlessly, along with exact days of delay.
+  if (type === "unpaid") {
+    const asOfParam = sp.get("asOf") || sp.get("to");
+    const asOfDate = parseDay(asOfParam, true) ?? new Date();
+
+    const fromParam = sp.get("since") || sp.get("from");
+    const fromDay = parseDay(fromParam);
+
+    // Limit month: the 1st of the month of the asOfDate
+    const maxMonth = new Date(Date.UTC(asOfDate.getUTCFullYear(), asOfDate.getUTCMonth(), 1));
+    const minMonth = fromDay ? new Date(Date.UTC(fromDay.getUTCFullYear(), fromDay.getUTCMonth(), 1)) : undefined;
+
+    // Ensure all missing monthly invoices up to asOfDate have been materialized
+    try {
+      await generateMissingInvoices(schoolId, asOfDate);
+    } catch {
+      // Non-blocking in case of concurrent execution
+    }
+
+    const invoices = await db.invoice.findMany({
+      where: {
+        student: studentWhere,
+        month: {
+          ...(minMonth ? { gte: minMonth } : {}),
+          lte: maxMonth,
+        },
+        ...(groupId ? { lines: { some: { enrollment: { groupId } } } } : {}),
+      },
+      include: {
+        lines: { include: { enrollment: { include: { group: true } } } },
+        payments: { orderBy: { paidAt: "desc" } },
+        student: true,
+      },
+      orderBy: [{ month: "desc" }],
+    });
+
+    const DAY = 86_400_000;
+    const unpaidInvoices = invoices.filter((i) => invoiceStatus(i) !== "PAID");
+
+    unpaidInvoices.sort((a, b) => {
+      // Primary: sort by oldest unpaid month first or student name
+      const diff = a.student.lastName.localeCompare(b.student.lastName);
+      if (diff !== 0) return diff;
+      return a.month.getTime() - b.month.getTime();
+    });
+
+    let sumDue = 0;
+    let sumPaid = 0;
+    let sumRemaining = 0;
+    let lateCount = 0;
+
+    const rows = unpaidInvoices.map((i) => {
+      const t = invoiceTotals(i);
+      const status = invoiceStatus(i);
+
+      // Delay measured against the cut-off date or now (whichever is earlier or relevant)
+      const diffMs = asOfDate.getTime() - i.dueDate.getTime();
+      const lateDays = Math.floor(diffMs / DAY);
+
+      if (lateDays > 0) lateCount++;
+
+      sumDue += t.due;
+      sumPaid += t.paid;
+      sumRemaining += t.remaining;
+
+      const lastPayment = i.payments[0];
+
+      // Student registration date or first enrollment date
+      const regDate = i.student.registeredAt ? formatDate(i.student.registeredAt) : "—";
+
+      const subjectOrGroup = i.lines
+        .map((l) => l.enrollment?.group?.name ?? l.label)
+        .filter(Boolean)
+        .join(", ");
+
+      const delayLabel =
+        lateDays > 0
+          ? `${lateDays} j`
+          : lateDays === 0
+            ? "Aujourd'hui"
+            : `Non échu (${Math.abs(lateDays)} j)`;
+
+      return [
+        `${i.student.lastName} ${i.student.firstName}`,
+        regDate,
+        i.student.parentPhone ?? i.student.parentEmail ?? "—",
+        subjectOrGroup || "—",
+        formatMonth(i.month),
+        formatDate(i.dueDate),
+        delayLabel,
+        t.due,
+        t.paid,
+        t.remaining,
+        statusMeta[status].label,
+        lastPayment ? formatDate(lastPayment.paidAt) : "Aucun",
+      ];
+    });
+
+    const recoveryRate = sumDue > 0 ? Math.round((sumPaid / sumDue) * 1000) / 10 : 0;
+    const uniqueStudents = new Set(unpaidInvoices.map((i) => i.studentId)).size;
+
+    return {
+      title: "Élèves non payés & impayés cumulés",
       subtitle: [
-        since ? `Depuis le ${formatDate(since)}` : "Toutes les périodes",
-        `Jusqu'au ${formatDate(until)}`,
-        "Factures non totalement réglées",
-        "Dates d'inscription affichées",
-      ].join(" · "),
+        groupLabel,
+        `Arrêté au ${formatDate(asOfDate)}`,
+        fromDay ? `Depuis le ${formatDate(fromDay)}` : "Tous les mois antérieurs inclus",
+        `${uniqueStudents} élève(s) avec solde impayé`,
+      ]
+        .filter(Boolean)
+        .join(" · "),
       head: [
         "Élève",
-        "Inscription",
-        "Dernière inscription",
-        "Téléphone",
-        "Matières",
-        "Mois",
+        "Inscrit le",
+        "Téléphone parent",
+        "Groupe / Matières",
+        "Mois impayé",
         "Échéance",
         "Retard",
         "Dû",
@@ -164,86 +289,183 @@ export async function buildDataset(schoolId: number, sp: URLSearchParams): Promi
         "Dernier paiement",
       ],
       rows,
-      money: [8, 9, 10],
+      money: [7, 8, 9],
       slug: "eleves-non-payes",
+      summary: {
+        totalDue: sumDue,
+        totalPaid: sumPaid,
+        totalRemaining: sumRemaining,
+        recoveryRate,
+        totalCount: rows.length,
+        lateCount,
+        uniqueStudents,
+      },
     };
   }
 
+  // ── 3. Reçus & Encaissements (Receipts) ───────────────────────────────────────
   if (type === "receipts") {
     const payments = await db.payment.findMany({
-      where: { invoice: { student: studentWhere }, ...(range(from, to) ? { paidAt: range(from, to) } : {}) },
-      include: { invoice: { include: { student: true } } },
+      where: {
+        invoice: {
+          student: studentWhere,
+          ...(groupId ? { lines: { some: { enrollment: { groupId } } } } : {}),
+        },
+        ...(range(from, to) ? { paidAt: range(from, to) } : {}),
+      },
+      include: {
+        invoice: {
+          include: {
+            student: true,
+            lines: { include: { enrollment: { include: { group: true } } } },
+          },
+        },
+      },
       orderBy: { paidAt: "desc" },
     });
-    return {
-      title: "Reçus de paiement",
-      subtitle: periodLabel(sp),
-      head: ["N° reçu", "Date", "Élève", "Mois", "Montant", "Mode"],
-      rows: payments.map((p) => [
+
+    let totalAmount = 0;
+    const rows = payments.map((p) => {
+      const amt = Number(p.amount.toString());
+      totalAmount += amt;
+      const groupName =
+        p.invoice.lines.map((l) => l.enrollment?.group?.name ?? l.label).join(", ") || "—";
+
+      return [
         p.receiptNo ?? `#${p.id}`,
         formatDate(p.paidAt),
         `${p.invoice.student.lastName} ${p.invoice.student.firstName}`,
+        groupName,
         formatMonth(p.invoice.month),
-        Number(p.amount.toString()),
+        amt,
         methodLabel(p.method),
-      ]),
-      money: [4],
-      slug: "recus",
+      ];
+    });
+
+    return {
+      title: "Reçus de paiement & Encaissements",
+      subtitle: [groupLabel, periodLabel(sp)].filter(Boolean).join(" · ") || undefined,
+      head: ["N° reçu", "Date paiement", "Élève", "Groupe", "Mois", "Montant", "Mode"],
+      rows,
+      money: [5],
+      slug: "recus-de-paiement",
+      summary: {
+        totalDue: totalAmount,
+        totalPaid: totalAmount,
+        totalRemaining: 0,
+        recoveryRate: 100,
+        totalCount: rows.length,
+        uniqueStudents: new Set(payments.map((p) => p.invoice.studentId)).size,
+      },
     };
   }
 
+  // ── 4. Liste des Inscriptions (Enrollments) ──────────────────────────────────
   if (type === "enrollments") {
     const enrollments = await db.enrollment.findMany({
-      where: { student: studentWhere, ...(range(from, to) ? { startedAt: range(from, to) } : {}) },
-      include: { group: { include: { specialty: true, level: true, teacher: true } }, student: true },
-      orderBy: [{ status: "asc" }],
+      where: {
+        student: studentWhere,
+        ...(groupId ? { groupId } : {}),
+        ...(range(from, to) ? { startedAt: range(from, to) } : {}),
+      },
+      include: {
+        group: { include: { specialty: true, level: true, teacher: true } },
+        student: true,
+      },
+      orderBy: [{ status: "asc" }, { startedAt: "desc" }],
     });
-    return {
-      title: "Liste des inscriptions",
-      subtitle: periodLabel(sp),
-      head: ["Élève", "Groupe", "Matière", "Niveau", "Enseignant", "Mensualité", "Statut"],
-      rows: enrollments.map((e) => [
+
+    let sumFees = 0;
+    const rows = enrollments.map((e) => {
+      const fee = Number(e.monthlyFee.toString());
+      if (e.status === "ACTIVE") sumFees += fee;
+      return [
         `${e.student.lastName} ${e.student.firstName}`,
         e.group.name,
         e.group.specialty.name,
         e.group.level.name,
         e.group.teacher?.name ?? "—",
-        Number(e.monthlyFee.toString()),
+        formatDate(e.startedAt),
+        fee,
         e.status === "ACTIVE" ? "Active" : "Arrêtée",
-      ]),
-      money: [5],
+      ];
+    });
+
+    const activeCount = enrollments.filter((e) => e.status === "ACTIVE").length;
+
+    return {
+      title: "Liste des inscriptions par groupe",
+      subtitle: [groupLabel, periodLabel(sp)].filter(Boolean).join(" · ") || undefined,
+      head: ["Élève", "Groupe", "Matière", "Niveau", "Enseignant", "Date début", "Mensualité", "Statut"],
+      rows,
+      money: [6],
       slug: "liste-des-inscriptions",
+      summary: {
+        totalDue: sumFees,
+        totalPaid: sumFees,
+        totalRemaining: 0,
+        recoveryRate: 100,
+        totalCount: rows.length,
+        uniqueStudents: new Set(enrollments.map((e) => e.studentId)).size,
+        lateCount: enrollments.length - activeCount,
+      },
     };
   }
 
-  // students
+  // ── 5. Liste des Élèves (Students) ───────────────────────────────────────────
   const cols = new Set((sp.get("cols") ?? "groups,phone,status").split(","));
   const students = await db.student.findMany({
-    where: { ...studentWhere, ...(range(from, to) ? { registeredAt: range(from, to) } : {}) },
-    include: { enrollments: { include: { group: { include: { specialty: true, level: true } } } } },
+    where: {
+      ...studentWhere,
+      ...(range(from, to) ? { registeredAt: range(from, to) } : {}),
+      ...(groupId ? { enrollments: { some: { groupId } } } : {}),
+    },
+    include: {
+      enrollments: {
+        include: { group: { include: { specialty: true, level: true } } },
+      },
+    },
     orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
   });
+
   const stLabel = { ACTIVE: "Actif", PENDING: "En attente", INACTIVE: "Inactif" } as const;
 
-  const head = ["Nom complet"];
+  const head = ["Nom complet", "Date inscription"];
   if (cols.has("groups")) head.push("Matières", "Niveaux");
   if (cols.has("phone")) head.push("Parent", "Téléphone");
   if (cols.has("status")) head.push("Statut");
 
+  const rows = students.map((s) => {
+    const row: (string | number)[] = [
+      `${s.lastName} ${s.firstName}`,
+      s.registeredAt ? formatDate(s.registeredAt) : "—",
+    ];
+    if (cols.has("groups")) {
+      const activeEnrollments = s.enrollments.filter((e) => e.status === "ACTIVE");
+      row.push(
+        activeEnrollments.map((e) => e.group.specialty.name).join(", ") || "—",
+        [...new Set(activeEnrollments.map((e) => e.group.level.name))].join(", ") || "—",
+      );
+    }
+    if (cols.has("phone")) row.push(s.parentName ?? "—", s.parentPhone ?? "—");
+    if (cols.has("status")) row.push(stLabel[s.status]);
+    return row;
+  });
+
   return {
     title: "Liste des élèves",
-    subtitle: periodLabel(sp),
+    subtitle: [groupLabel, periodLabel(sp)].filter(Boolean).join(" · ") || undefined,
     head,
-    rows: students.map((s) => {
-      const row: (string | number)[] = [`${s.lastName} ${s.firstName}`];
-      if (cols.has("groups")) {
-        row.push(s.enrollments.map((e) => e.group.specialty.name).join(", ") || "—", [...new Set(s.enrollments.map((e) => e.group.level.name))].join(", ") || "—");
-      }
-      if (cols.has("phone")) row.push(s.parentName ?? "—", s.parentPhone ?? "—");
-      if (cols.has("status")) row.push(stLabel[s.status]);
-      return row;
-    }),
+    rows,
     money: [],
     slug: "liste-des-eleves",
+    summary: {
+      totalDue: 0,
+      totalPaid: 0,
+      totalRemaining: 0,
+      recoveryRate: 100,
+      totalCount: rows.length,
+      uniqueStudents: rows.length,
+    },
   };
 }
