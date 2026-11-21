@@ -349,13 +349,16 @@ export async function buildDataset(schoolId: number, sp: URLSearchParams): Promi
     const recoveryRate = sumDue > 0 ? Math.round((sumPaid / sumDue) * 1000) / 10 : 0;
     const uniqueStudents = new Set(entries.filter((e) => e.remaining > 0).map((e) => e.studentId)).size;
 
-    const windowText = minMonth
-      ? minMonth.getTime() === maxMonth.getTime()
-        ? `Mois de ${formatMonth(maxMonth)} uniquement`
-        : minMonth.getUTCMonth() === 0
-          ? `Année ${minMonth.getUTCFullYear()} (depuis janvier)`
-          : `Depuis ${formatMonth(minMonth)} → ${formatMonth(maxMonth)}`
-      : "Tout l'historique";
+    const windowText =
+      monthsParam === "all"
+        ? "Historique cumulatif inclus"
+        : monthsParam === "year"
+          ? `Année ${maxMonth.getUTCFullYear()} (depuis janvier)`
+          : monthsParam === "2"
+            ? `2 derniers mois (depuis ${formatMonth(minMonth!)})`
+            : monthsParam === "3"
+              ? `3 derniers mois (depuis ${formatMonth(minMonth!)})`
+              : `Mois sélectionné (${formatMonth(maxMonth)})`;
 
     return {
       title: "Élèves non payés & impayés récents",

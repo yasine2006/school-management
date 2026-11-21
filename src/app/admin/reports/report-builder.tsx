@@ -355,29 +355,29 @@ export function ReportBuilder({
                   </div>
                 </div>
 
-                {/* Unpaid History Window — current month by default (aligned with Relances) */}
+                {/* Plage des impayés — pilotée par la date sélectionnée (modèle client) */}
                 <div className="pt-2 border-t border-slate-200">
-                  <label className="block text-xs font-semibold text-slate-800 mb-1.5">
-                    Historique des impayés (Plage) :
+                  <label className="block text-[10px] font-bold uppercase tracking-wide text-muted mb-1.5">
+                    Plage des impayés
                   </label>
                   <div className="grid grid-cols-2 gap-1.5">
                     <button
                       type="button"
                       onClick={() => { setMonths("1"); setFrom(""); }}
-                      className={`rounded-lg px-2 py-1.5 text-xs font-semibold transition text-left border ${
+                      className={`rounded-lg px-2 py-2 text-[11px] font-bold transition border ${
                         months === "1" && !from
-                          ? "bg-brand-600 text-white border-brand-600 shadow-xs"
+                          ? "bg-navy-900 text-white border-navy-900 shadow-xs"
                           : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100"
                       }`}
                     >
-                      Ce mois (par défaut)
+                      Ce mois
                     </button>
                     <button
                       type="button"
                       onClick={() => { setMonths("2"); setFrom(""); }}
-                      className={`rounded-lg px-2 py-1.5 text-xs font-medium transition text-left border ${
+                      className={`rounded-lg px-2 py-2 text-[11px] font-bold transition border ${
                         months === "2" && !from
-                          ? "bg-brand-600 text-white border-brand-600 shadow-xs"
+                          ? "bg-navy-900 text-white border-navy-900 shadow-xs"
                           : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100"
                       }`}
                     >
@@ -386,9 +386,9 @@ export function ReportBuilder({
                     <button
                       type="button"
                       onClick={() => { setMonths("3"); setFrom(""); }}
-                      className={`rounded-lg px-2 py-1.5 text-xs font-medium transition text-left border ${
+                      className={`rounded-lg px-2 py-2 text-[11px] font-bold transition border ${
                         months === "3" && !from
-                          ? "bg-brand-600 text-white border-brand-600 shadow-xs"
+                          ? "bg-navy-900 text-white border-navy-900 shadow-xs"
                           : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100"
                       }`}
                     >
@@ -397,9 +397,9 @@ export function ReportBuilder({
                     <button
                       type="button"
                       onClick={() => { setMonths("year"); setFrom(""); }}
-                      className={`rounded-lg px-2 py-1.5 text-xs font-medium transition text-left border ${
+                      className={`rounded-lg px-2 py-2 text-[11px] font-bold transition border ${
                         months === "year" && !from
-                          ? "bg-brand-600 text-white border-brand-600 shadow-xs"
+                          ? "bg-navy-900 text-white border-navy-900 shadow-xs"
                           : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100"
                       }`}
                     >
@@ -408,25 +408,25 @@ export function ReportBuilder({
                     <button
                       type="button"
                       onClick={() => { setMonths("all"); setFrom(""); }}
-                      className={`rounded-lg px-2 py-1.5 text-xs font-medium transition text-left border ${
+                      className={`col-span-2 rounded-lg px-2 py-2 text-[11px] font-bold transition border ${
                         months === "all" && !from
-                          ? "bg-brand-600 text-white border-brand-600 shadow-xs"
+                          ? "bg-navy-900 text-white border-navy-900 shadow-xs"
                           : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100"
                       }`}
                     >
-                      Tout l&apos;historique
+                      Historique cumulatif
                     </button>
                   </div>
                   <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
                     {months === "1"
-                      ? "Uniquement les impayés du mois sélectionné (comme la page Relances)."
+                      ? "Uniquement les impayés du mois de la date choisie, jusqu'à cette date."
                       : months === "2"
-                        ? "Mois sélectionné + le mois d'avant uniquement."
+                        ? "Mois de la date choisie + le mois précédent, jusqu'à cette date."
                         : months === "3"
-                          ? "Prend les 3 derniers mois jusqu'à la date sélectionnée."
+                          ? "Mois de la date choisie + les 2 précédents, jusqu'à cette date."
                           : months === "year"
-                            ? "Toute l'année sélectionnée (janvier → date d'arrêté)."
-                            : "Prend l'ensemble des mois sans limite d'historique."}
+                            ? "Toute l'année de la date choisie (janvier → date d'arrêté)."
+                            : "Tous les impayés cumulés jusqu'à la date choisie, sans limite d'historique."}
                   </p>
                 </div>
 
