@@ -159,10 +159,11 @@ export async function buildDataset(schoolId: number, sp: URLSearchParams): Promi
     };
   }
 
-  // ── 2. Élèves non payés / Impayés cumulés (Unpaid) ───────────────────────────
-  // Business rule: Shows unpaid students up to a cut-off date (asOf/to).
-  // Window: By default the FULL history is included so all unpaid students appear.
-  // Admins may explicitly narrow the window via `months` (1, 2, 3) or `since`/`from`.
+  // ── 2. Élèves non payés / Impayés (Unpaid) ───────────────────────────────────
+  // Monthly by default (aligned with the Relances page): current month only.
+  // Uses the same scope as Relances — ACTIVE students with an ACTIVE enrollment —
+  // and includes students without an invoice (MISSING, with expected amount) so
+  // the KPIs match the "Reste à encaisser" card exactly.
   if (type === "unpaid") {
     const asOfParam = sp.get("asOf") || sp.get("to");
     const asOfDate = parseDay(asOfParam, true) ?? new Date();
@@ -170,48 +171,140 @@ export async function buildDataset(schoolId: number, sp: URLSearchParams): Promi
     const fromParam = sp.get("since") || sp.get("from");
     const fromDay = parseDay(fromParam);
 
-    const monthsParam = sp.get("months") ?? "all";
+    const monthsParam = sp.get("months") ?? "1";
 
     // Upper bound month: 1st of the month of the asOfDate
     const maxMonth = new Date(Date.UTC(asOfDate.getUTCFullYear(), asOfDate.getUTCMonth(), 1));
 
-    // Lower bound month: full history unless the admin explicitly narrows it
+    // Lower bound month: current month unless the admin explicitly widens it
     let minMonth: Date | undefined;
     if (fromDay) {
       minMonth = new Date(Date.UTC(fromDay.getUTCFullYear(), fromDay.getUTCMonth(), 1));
-    } else if (monthsParam === "1") {
-      minMonth = maxMonth;
     } else if (monthsParam === "2") {
       minMonth = new Date(Date.UTC(maxMonth.getUTCFullYear(), maxMonth.getUTCMonth() - 1, 1));
     } else if (monthsParam === "3") {
       minMonth = new Date(Date.UTC(maxMonth.getUTCFullYear(), maxMonth.getUTCMonth() - 2, 1));
+    } else if (monthsParam === "all") {
+      minMonth = undefined; // all past months
     } else {
-      // Default: all past months (no lower bound)
-      minMonth = undefined;
+      // Default: current month only (par mois, comme la page Relances)
+      minMonth = maxMonth;
     }
 
-    const invoices = await db.invoice.findMany({
+    // Same student scope as the Relances page: active students with active enrollments.
+    const students = await db.student.findMany({
       where: {
-        student: studentWhere,
-        month: {
-          ...(minMonth ? { gte: minMonth } : {}),
-          lte: maxMonth,
-        },
-        ...(groupId ? { lines: { some: { enrollment: { groupId } } } } : {}),
+        schoolId,
+        archived: false,
+        status: "ACTIVE",
+        enrollments: { some: { status: "ACTIVE" } },
+        ...(await studentSearchWhere(q, schoolId)),
+        ...(groupId || specialtyId
+          ? {
+              enrollments: {
+                some: {
+                  status: "ACTIVE",
+                  ...(groupId ? { groupId } : {}),
+                  ...(specialtyId ? { group: { specialtyId } } : {}),
+                },
+              },
+            }
+          : {}),
       },
       include: {
-        lines: { include: { enrollment: { include: { group: true } } } },
-        payments: { orderBy: { paidAt: "desc" } },
-        student: true,
+        enrollments: { where: { status: "ACTIVE" }, include: { group: true } },
+        invoices: {
+          where: {
+            month: { ...(minMonth ? { gte: minMonth } : {}), lte: maxMonth },
+            ...(groupId ? { lines: { some: { enrollment: { groupId } } } } : {}),
+          },
+          include: {
+            lines: { include: { enrollment: { include: { group: true } } } },
+            payments: { orderBy: { paidAt: "desc" } },
+          },
+          orderBy: [{ month: "desc" }],
+        },
       },
-      orderBy: [{ month: "desc" }],
+      orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
     });
 
     const DAY = 86_400_000;
-    const unpaidInvoices = invoices.filter((i) => invoiceStatus(i) !== "PAID");
+    const fallbackDue = new Date(Date.UTC(maxMonth.getUTCFullYear(), maxMonth.getUTCMonth(), 5));
 
-    unpaidInvoices.sort((a, b) => {
-      const diff = a.student.lastName.localeCompare(b.student.lastName);
+    type UnpaidEntry = {
+      studentId: number;
+      name: string;
+      regDate: string;
+      phone: string;
+      group: string;
+      month: Date;
+      dueDate: Date;
+      lateDays: number;
+      due: number;
+      paid: number;
+      remaining: number;
+      statusLabel: string;
+      lastPayment: string;
+    };
+
+    const entries: UnpaidEntry[] = [];
+    for (const s of students) {
+      const expected = s.enrollments.reduce((sum, e) => sum + Number(e.monthlyFee.toString()), 0);
+      const allGroups = Array.from(new Set(s.enrollments.map((e) => e.group.name))).join(", ") || "—";
+      const regDate = s.registeredAt ? formatDate(s.registeredAt) : "—";
+      const phone = s.parentPhone ?? s.parentEmail ?? "—";
+      const unpaidInvoices = s.invoices.filter((i) => invoiceStatus(i) !== "PAID");
+
+      if (!unpaidInvoices.length) {
+        // No invoice in the window → MISSING, counted with expected amount (like Relances).
+        if (!s.invoices.length && expected > 0) {
+          const lateDays = Math.floor((asOfDate.getTime() - fallbackDue.getTime()) / DAY);
+          entries.push({
+            studentId: s.id,
+            name: `${s.lastName} ${s.firstName}`,
+            regDate,
+            phone,
+            group: allGroups,
+            month: maxMonth,
+            dueDate: fallbackDue,
+            lateDays,
+            due: expected,
+            paid: 0,
+            remaining: expected,
+            statusLabel: "Sans facture",
+            lastPayment: "Aucun",
+          });
+        }
+        continue;
+      }
+
+      for (const i of unpaidInvoices) {
+        const t = invoiceTotals(i);
+        const status = invoiceStatus(i);
+        const lateDays = Math.floor((asOfDate.getTime() - i.dueDate.getTime()) / DAY);
+        const subjectOrGroup =
+          i.lines.map((l) => l.enrollment?.group?.name ?? l.label).filter(Boolean).join(", ") || allGroups;
+        const lastPayment = i.payments[0];
+        entries.push({
+          studentId: s.id,
+          name: `${s.lastName} ${s.firstName}`,
+          regDate,
+          phone,
+          group: subjectOrGroup,
+          month: i.month,
+          dueDate: i.dueDate,
+          lateDays,
+          due: t.due,
+          paid: t.paid,
+          remaining: t.remaining,
+          statusLabel: statusMeta[status].label,
+          lastPayment: lastPayment ? formatDate(lastPayment.paidAt) : "Aucun",
+        });
+      }
+    }
+
+    entries.sort((a, b) => {
+      const diff = a.name.localeCompare(b.name);
       if (diff !== 0) return diff;
       return a.month.getTime() - b.month.getTime();
     });
@@ -221,58 +314,42 @@ export async function buildDataset(schoolId: number, sp: URLSearchParams): Promi
     let sumRemaining = 0;
     let lateCount = 0;
 
-    const rows = unpaidInvoices.map((i) => {
-      const t = invoiceTotals(i);
-      const status = invoiceStatus(i);
-
-      // Delay measured against the cut-off date
-      const diffMs = asOfDate.getTime() - i.dueDate.getTime();
-      const lateDays = Math.floor(diffMs / DAY);
-
-      if (lateDays > 0) lateCount++;
-
-      sumDue += t.due;
-      sumPaid += t.paid;
-      sumRemaining += t.remaining;
-
-      const lastPayment = i.payments[0];
-      const regDate = i.student.registeredAt ? formatDate(i.student.registeredAt) : "—";
-
-      const subjectOrGroup = i.lines
-        .map((l) => l.enrollment?.group?.name ?? l.label)
-        .filter(Boolean)
-        .join(", ");
+    const rows = entries.map((e) => {
+      if (e.lateDays > 0) lateCount++;
+      sumDue += e.due;
+      sumPaid += e.paid;
+      sumRemaining += e.remaining;
 
       const delayLabel =
-        lateDays > 0
-          ? `${lateDays} j`
-          : lateDays === 0
+        e.lateDays > 0
+          ? `${e.lateDays} j`
+          : e.lateDays === 0
             ? "Aujourd'hui"
-            : `Non échu (${Math.abs(lateDays)} j)`;
+            : `Non échu (${Math.abs(e.lateDays)} j)`;
 
       return [
-        `${i.student.lastName} ${i.student.firstName}`,
-        regDate,
-        i.student.parentPhone ?? i.student.parentEmail ?? "—",
-        subjectOrGroup || "—",
-        formatMonth(i.month),
-        formatDate(i.dueDate),
+        e.name,
+        e.regDate,
+        e.phone,
+        e.group,
+        formatMonth(e.month),
+        formatDate(e.dueDate),
         delayLabel,
-        t.due,
-        t.paid,
-        t.remaining,
-        statusMeta[status].label,
-        lastPayment ? formatDate(lastPayment.paidAt) : "Aucun",
+        e.due,
+        e.paid,
+        e.remaining,
+        e.statusLabel,
+        e.lastPayment,
       ];
     });
 
     const recoveryRate = sumDue > 0 ? Math.round((sumPaid / sumDue) * 1000) / 10 : 0;
-    const uniqueStudents = new Set(unpaidInvoices.map((i) => i.studentId)).size;
+    const uniqueStudents = new Set(entries.filter((e) => e.remaining > 0).map((e) => e.studentId)).size;
 
     const windowText = minMonth
       ? minMonth.getTime() === maxMonth.getTime()
         ? `Mois de ${formatMonth(maxMonth)} uniquement`
-        : `2 mois max (${formatMonth(minMonth)} & ${formatMonth(maxMonth)})`
+        : `Depuis ${formatMonth(minMonth)} → ${formatMonth(maxMonth)}`
       : "Tout l'historique";
 
     return {

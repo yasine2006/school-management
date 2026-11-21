@@ -47,7 +47,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
     buildDataset(
       schoolId,
       new URLSearchParams(
-        tab.key === "unpaid" ? { type: tab.key, asOf: todayInput, months: "all" } : { type: tab.key },
+        tab.key === "unpaid" ? { type: tab.key, asOf: todayInput, months: "1" } : { type: tab.key },
       ),
     ),
     tab.key === "receipts"

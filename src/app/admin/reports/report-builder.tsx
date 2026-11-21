@@ -77,7 +77,7 @@ export function ReportBuilder({
   const [asOf, setAsOf] = useState(isUnpaid ? todayInput : "");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
-  const [months, setMonths] = useState("all"); // default: full history so all unpaid students appear
+  const [months, setMonths] = useState("1"); // default: current month only (aligned with Relances)
   const [groupId, setGroupId] = useState("");
   const [status, setStatus] = useState("");
   const [query, setQuery] = useState("");
@@ -262,13 +262,13 @@ export function ReportBuilder({
                 </span>
                 <h3 className="text-sm font-bold text-ink">Filtres du rapport</h3>
               </div>
-              {(groupId || asOf !== todayInput || months !== "all" || from || to || status || query) && (
+              {(groupId || asOf !== todayInput || months !== "1" || from || to || status || query) && (
                 <button
                   type="button"
                   onClick={() => {
                     setGroupId("");
                     setAsOf(isUnpaid ? todayInput : "");
-                    setMonths("all");
+                    setMonths("1");
                     setFrom("");
                     setTo("");
                     setStatus("");
@@ -355,7 +355,7 @@ export function ReportBuilder({
                   </div>
                 </div>
 
-                {/* Unpaid History Window — full history by default */}
+                {/* Unpaid History Window — current month by default (aligned with Relances) */}
                 <div className="pt-2 border-t border-slate-200">
                   <label className="block text-xs font-semibold text-slate-800 mb-1.5">
                     Historique des impayés (Plage) :
@@ -363,25 +363,14 @@ export function ReportBuilder({
                   <div className="grid grid-cols-2 gap-1.5">
                     <button
                       type="button"
-                      onClick={() => { setMonths("all"); setFrom(""); }}
+                      onClick={() => { setMonths("1"); setFrom(""); }}
                       className={`rounded-lg px-2 py-1.5 text-xs font-semibold transition text-left border ${
-                        months === "all" && !from
+                        months === "1" && !from
                           ? "bg-brand-600 text-white border-brand-600 shadow-xs"
                           : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100"
                       }`}
                     >
-                      Tout l&apos;historique (par défaut)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { setMonths("3"); setFrom(""); }}
-                      className={`rounded-lg px-2 py-1.5 text-xs font-medium transition text-left border ${
-                        months === "3" && !from
-                          ? "bg-brand-600 text-white border-brand-600 shadow-xs"
-                          : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100"
-                      }`}
-                    >
-                      3 derniers mois
+                      Ce mois (par défaut)
                     </button>
                     <button
                       type="button"
@@ -396,24 +385,35 @@ export function ReportBuilder({
                     </button>
                     <button
                       type="button"
-                      onClick={() => { setMonths("1"); setFrom(""); }}
+                      onClick={() => { setMonths("3"); setFrom(""); }}
                       className={`rounded-lg px-2 py-1.5 text-xs font-medium transition text-left border ${
-                        months === "1" && !from
+                        months === "3" && !from
                           ? "bg-brand-600 text-white border-brand-600 shadow-xs"
                           : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100"
                       }`}
                     >
-                      Ce mois uniquement
+                      3 derniers mois
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setMonths("all"); setFrom(""); }}
+                      className={`rounded-lg px-2 py-1.5 text-xs font-medium transition text-left border ${
+                        months === "all" && !from
+                          ? "bg-brand-600 text-white border-brand-600 shadow-xs"
+                          : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100"
+                      }`}
+                    >
+                      Tout l&apos;historique
                     </button>
                   </div>
                   <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
                     {months === "1"
-                      ? "Uniquement les impayés du mois de la date sélectionnée."
+                      ? "Uniquement les impayés du mois sélectionné (comme la page Relances)."
                       : months === "2"
                         ? "Mois sélectionné + le mois d'avant uniquement."
                         : months === "3"
                           ? "Prend les 3 derniers mois jusqu'à la date sélectionnée."
-                          : "Prend l'ensemble des mois sans limite d'historique — tous les élèves impayés apparaissent."}
+                          : "Prend l'ensemble des mois sans limite d'historique."}
                   </p>
                 </div>
 
