@@ -106,7 +106,15 @@ export async function reminderRows(schoolId: number, month: Date): Promise<Remin
         : paid > 0
           ? "PARTIAL"
           : "UNPAID";
-    const dueDate = invoice?.dueDate ?? fallbackDue;
+    // Never due before enrollment + 5 days (a late enrollment must not be
+    // flagged as overdue from the 5th of the month).
+    const firstStart = s.enrollments.reduce<Date | null>(
+      (min, e) => (min === null || e.startedAt < min ? e.startedAt : min),
+      null,
+    );
+    const afterEnrollment = firstStart ? new Date(firstStart.getTime() + 5 * DAY) : null;
+    const baseDue = invoice?.dueDate ?? fallbackDue;
+    const dueDate = afterEnrollment && afterEnrollment > baseDue ? afterEnrollment : baseDue;
     const daysLate = remaining > 0 ? Math.max(0, Math.floor((now.getTime() - dueDate.getTime()) / DAY)) : 0;
     const remindedAt = invoice ? (lastReminder.get(invoice.id) ?? null) : null;
     const phone = normalizePhone(s.parentPhone);

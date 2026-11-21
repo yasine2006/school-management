@@ -232,6 +232,19 @@ export async function buildDataset(schoolId: number, sp: URLSearchParams): Promi
     });
 
     const DAY = 86_400_000;
+
+    // Business rule: an invoice is never due before enrollment + 5 days,
+    // even if its stored dueDate is the 5th of the month (older invoices).
+    const effectiveDue = (baseDue: Date, enrollments: { startedAt: Date }[]) => {
+      if (!enrollments.length) return baseDue;
+      const firstStart = enrollments.reduce(
+        (min, e) => (e.startedAt.getTime() < min.getTime() ? e.startedAt : min),
+        enrollments[0].startedAt,
+      );
+      const afterEnrollment = new Date(firstStart.getTime() + 5 * DAY);
+      return afterEnrollment > baseDue ? afterEnrollment : baseDue;
+    };
+
     const fallbackDue = new Date(Date.UTC(maxMonth.getUTCFullYear(), maxMonth.getUTCMonth(), 5));
 
     type UnpaidEntry = {
@@ -259,24 +272,28 @@ export async function buildDataset(schoolId: number, sp: URLSearchParams): Promi
       const unpaidInvoices = s.invoices.filter((i) => invoiceStatus(i) !== "PAID");
 
       if (!unpaidInvoices.length) {
-        // No invoice in the window → MISSING, counted with expected amount (like Relances).
+        // No invoice in the window → MISSING, counted with expected amount (like Relances),
+        // but ONLY once the enrollment + 5 days grace period has actually elapsed.
         if (!s.invoices.length && expected > 0) {
-          const lateDays = Math.floor((asOfDate.getTime() - fallbackDue.getTime()) / DAY);
-          entries.push({
-            studentId: s.id,
-            name: `${s.lastName} ${s.firstName}`,
-            regDate,
-            phone,
-            group: allGroups,
-            month: maxMonth,
-            dueDate: fallbackDue,
-            lateDays,
-            due: expected,
-            paid: 0,
-            remaining: expected,
-            statusLabel: "Sans facture",
-            lastPayment: "Aucun",
-          });
+          const due = effectiveDue(fallbackDue, s.enrollments);
+          if (due.getTime() <= asOfDate.getTime()) {
+            const lateDays = Math.floor((asOfDate.getTime() - due.getTime()) / DAY);
+            entries.push({
+              studentId: s.id,
+              name: `${s.lastName} ${s.firstName}`,
+              regDate,
+              phone,
+              group: allGroups,
+              month: maxMonth,
+              dueDate: due,
+              lateDays,
+              due: expected,
+              paid: 0,
+              remaining: expected,
+              statusLabel: "Sans facture",
+              lastPayment: "Aucun",
+            });
+          }
         }
         continue;
       }
@@ -284,7 +301,8 @@ export async function buildDataset(schoolId: number, sp: URLSearchParams): Promi
       for (const i of unpaidInvoices) {
         const t = invoiceTotals(i);
         const status = invoiceStatus(i);
-        const lateDays = Math.floor((asOfDate.getTime() - i.dueDate.getTime()) / DAY);
+        const due = effectiveDue(i.dueDate, s.enrollments);
+        const lateDays = Math.floor((asOfDate.getTime() - due.getTime()) / DAY);
         const subjectOrGroup =
           i.lines.map((l) => l.enrollment?.group?.name ?? l.label).filter(Boolean).join(", ") || allGroups;
         const lastPayment = i.payments[0];
@@ -295,7 +313,7 @@ export async function buildDataset(schoolId: number, sp: URLSearchParams): Promi
           phone,
           group: subjectOrGroup,
           month: i.month,
-          dueDate: i.dueDate,
+          dueDate: due,
           lateDays,
           due: t.due,
           paid: t.paid,
