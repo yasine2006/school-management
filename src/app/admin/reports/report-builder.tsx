@@ -16,7 +16,6 @@ import {
   Percent,
   RefreshCw,
   Search,
-  Users,
 } from "lucide-react";
 import { formatDH } from "@/lib/format";
 import { Card, selectCls } from "@/components/ui";
@@ -78,6 +77,7 @@ export function ReportBuilder({
   const [asOf, setAsOf] = useState(isUnpaid ? todayInput : "");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  const [months, setMonths] = useState("2"); // default maximum 2 months as requested
   const [groupId, setGroupId] = useState("");
   const [status, setStatus] = useState("");
   const [query, setQuery] = useState("");
@@ -94,12 +94,7 @@ export function ReportBuilder({
   const colsParam = COLS.filter((c) => cols[c.key]).map((c) => c.key).join(",");
 
   // Helper date presets
-  const presetAsOf = (mode: "today" | "endOfMonth" | "all") => {
-    if (mode === "all") {
-      setAsOf("");
-      setFrom("");
-      return;
-    }
+  const presetAsOf = (mode: "today" | "endOfMonth") => {
     const d = new Date();
     if (mode === "endOfMonth") {
       const lastDay = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0));
@@ -135,6 +130,7 @@ export function ReportBuilder({
     if (isUnpaid) {
       if (asOf) sp.set("asOf", asOf);
       if (from) sp.set("from", from);
+      if (months) sp.set("months", months);
     } else {
       if (from) sp.set("from", from);
       if (to) sp.set("to", to);
@@ -144,7 +140,7 @@ export function ReportBuilder({
     if (query.trim()) sp.set("q", query.trim());
     if (withCols) sp.set("cols", colsParam);
     return sp;
-  }, [type, isUnpaid, asOf, from, to, groupId, isInvoices, status, query, withCols, colsParam]);
+  }, [type, isUnpaid, asOf, from, months, to, groupId, isInvoices, status, query, withCols, colsParam]);
 
   const href = (format: "pdf" | "xlsx", extra?: Record<string, string>) => {
     const sp = buildParams();
@@ -185,7 +181,7 @@ export function ReportBuilder({
 
   return (
     <div className="space-y-6">
-      {/* ── Summary KPI Cards (Financial & Operational Intelligence) ── */}
+      {/* ── Summary KPI Cards (Clear Financial & Operational Intelligence) ── */}
       {sum && (
         <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-4">
           <Card className="flex items-center gap-4 p-4 border border-slate-200/80 bg-white shadow-xs">
@@ -194,12 +190,12 @@ export function ReportBuilder({
             </span>
             <div className="min-w-0 flex-1">
               <p className="text-xs font-semibold uppercase tracking-wider text-muted">
-                {isUnpaid ? "Total Facturé" : "Total Dû"}
+                Total Facturé (Dû)
               </p>
               <p className="mt-0.5 text-xl font-bold tracking-tight text-ink">
                 {formatDH(sum.totalDue)}
               </p>
-              <p className="text-[11px] text-muted">{sum.totalCount} dossier(s)</p>
+              <p className="text-[11px] text-muted">{sum.totalCount} facture(s) sur la période</p>
             </div>
           </Card>
 
@@ -209,7 +205,7 @@ export function ReportBuilder({
             </span>
             <div className="min-w-0 flex-1">
               <p className="text-xs font-semibold uppercase tracking-wider text-muted">
-                Total Encaissé
+                Total Déjà Payé (Encaissé)
               </p>
               <p className="mt-0.5 text-xl font-bold tracking-tight text-emerald-600">
                 {formatDH(sum.totalPaid)}
@@ -224,13 +220,13 @@ export function ReportBuilder({
             </span>
             <div className="min-w-0 flex-1">
               <p className="text-xs font-semibold uppercase tracking-wider text-rose-700">
-                Reste à Recouvrer
+                Total Impayé (Non Payé)
               </p>
               <p className="mt-0.5 text-xl font-bold tracking-tight text-rose-700">
                 {formatDH(sum.totalRemaining)}
               </p>
               <p className="text-[11px] text-rose-600/80">
-                {sum.uniqueStudents ? `${sum.uniqueStudents} élève(s) concerné(s)` : "Solde impayé"}
+                {sum.uniqueStudents ? `${sum.uniqueStudents} élève(s) avec reste à payer` : "Solde restant dû"}
               </p>
             </div>
           </Card>
@@ -241,13 +237,13 @@ export function ReportBuilder({
             </span>
             <div className="min-w-0 flex-1">
               <p className="text-xs font-semibold uppercase tracking-wider text-muted">
-                Recouvrement & Retard
+                Taux de Paiement
               </p>
               <p className="mt-0.5 text-xl font-bold tracking-tight text-ink">
-                {sum.recoveryRate}%
+                {sum.recoveryRate}% réglé
               </p>
               <p className="text-[11px] font-medium text-rose-600">
-                {sum.lateCount ? `${sum.lateCount} échéance(s) dépassée(s)` : "Aucun retard critique"}
+                {sum.lateCount ? `${sum.lateCount} échéance(s) en retard` : "Toutes les échéances à jour"}
               </p>
             </div>
           </Card>
@@ -264,14 +260,15 @@ export function ReportBuilder({
                 <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
                   <Filter size={15} />
                 </span>
-                <h3 className="text-sm font-bold text-ink">Critères de filtrage</h3>
+                <h3 className="text-sm font-bold text-ink">Filtres du rapport</h3>
               </div>
-              {(groupId || asOf !== todayInput || from || to || status || query) && (
+              {(groupId || asOf !== todayInput || months !== "2" || from || to || status || query) && (
                 <button
                   type="button"
                   onClick={() => {
                     setGroupId("");
                     setAsOf(isUnpaid ? todayInput : "");
+                    setMonths("2");
                     setFrom("");
                     setTo("");
                     setStatus("");
@@ -323,9 +320,10 @@ export function ReportBuilder({
               </div>
             </div>
 
-            {/* 3. Date & As-Of Date Filtering */}
+            {/* 3. Date & Window Filtering */}
             {isUnpaid ? (
-              <div className="space-y-3 rounded-xl bg-slate-50/80 p-3.5 border border-slate-200/80">
+              <div className="space-y-3.5 rounded-xl bg-slate-50/80 p-3.5 border border-slate-200/80">
+                {/* As of Date */}
                 <div>
                   <label className="block text-xs font-semibold text-ink mb-1 flex items-center gap-1.5">
                     <Calendar size={14} className="text-rose-600" />
@@ -337,43 +335,92 @@ export function ReportBuilder({
                     onChange={(e) => setAsOf(e.target.value)}
                     className={`${selectCls} w-full bg-white font-medium`}
                   />
+                  <div className="mt-1.5 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => presetAsOf("today")}
+                      className={`rounded-lg px-2.5 py-1 text-xs font-medium transition ${
+                        asOf === todayInput ? "bg-brand-600 text-white" : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-100"
+                      }`}
+                    >
+                      Aujourd&apos;hui
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => presetAsOf("endOfMonth")}
+                      className="rounded-lg bg-white px-2.5 py-1 text-xs font-medium text-slate-700 border border-slate-200 hover:bg-slate-100"
+                    >
+                      Fin du mois
+                    </button>
+                  </div>
+                </div>
+
+                {/* Maximum 2 Months Window (Key Business Rule) */}
+                <div className="pt-2 border-t border-slate-200">
+                  <label className="block text-xs font-semibold text-slate-800 mb-1.5">
+                    Historique des impayés (Plage) :
+                  </label>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => { setMonths("2"); setFrom(""); }}
+                      className={`rounded-lg px-2 py-1.5 text-xs font-semibold transition text-left border ${
+                        months === "2" && !from
+                          ? "bg-brand-600 text-white border-brand-600 shadow-xs"
+                          : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100"
+                      }`}
+                    >
+                      2 mois max (conseillé)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setMonths("1"); setFrom(""); }}
+                      className={`rounded-lg px-2 py-1.5 text-xs font-medium transition text-left border ${
+                        months === "1" && !from
+                          ? "bg-brand-600 text-white border-brand-600 shadow-xs"
+                          : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100"
+                      }`}
+                    >
+                      Ce mois uniquement
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setMonths("3"); setFrom(""); }}
+                      className={`rounded-lg px-2 py-1.5 text-xs font-medium transition text-left border ${
+                        months === "3" && !from
+                          ? "bg-brand-600 text-white border-brand-600 shadow-xs"
+                          : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100"
+                      }`}
+                    >
+                      3 derniers mois
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setMonths("all"); setFrom(""); }}
+                      className={`rounded-lg px-2 py-1.5 text-xs font-medium transition text-left border ${
+                        months === "all" && !from
+                          ? "bg-brand-600 text-white border-brand-600 shadow-xs"
+                          : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100"
+                      }`}
+                    >
+                      Tout l&apos;historique
+                    </button>
+                  </div>
                   <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
-                    Inclut <strong>tous les impayés cumulés</strong> depuis l&apos;inscription de l&apos;élève jusqu&apos;à cette date (ex : un élève inscrit le 05/10 ressortira avec ses dettes d&apos;octobre et de novembre lors d&apos;une recherche au 10/11).
+                    {months === "2"
+                      ? "Prend le mois sélectionné + le mois d'avant (ex : si vous filtrez le 10/11, cela prend les impayés d'octobre et novembre, sans remonter toute l'année)."
+                      : months === "1"
+                        ? "Uniquement les impayés du mois de la date sélectionnée."
+                        : months === "3"
+                          ? "Prend les 3 derniers mois jusqu'à la date sélectionnée."
+                          : "Prend l'ensemble des mois sans limite d'historique."}
                   </p>
                 </div>
 
-                <div className="flex flex-wrap gap-1.5 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => presetAsOf("today")}
-                    className={`rounded-lg px-2.5 py-1 text-xs font-medium transition ${
-                      asOf === todayInput ? "bg-brand-600 text-white" : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-100"
-                    }`}
-                  >
-                    Aujourd&apos;hui
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => presetAsOf("endOfMonth")}
-                    className="rounded-lg bg-white px-2.5 py-1 text-xs font-medium text-slate-700 border border-slate-200 hover:bg-slate-100"
-                  >
-                    Fin du mois
-                  </button>
-                  {asOf && (
-                    <button
-                      type="button"
-                      onClick={() => presetAsOf("all")}
-                      className="rounded-lg bg-white px-2.5 py-1 text-xs font-medium text-rose-600 border border-rose-200 hover:bg-rose-50"
-                    >
-                      Tout afficher
-                    </button>
-                  )}
-                </div>
-
-                {/* Optional Start Date */}
+                {/* Optional Custom Start Date */}
                 <div className="pt-2 border-t border-slate-200">
                   <label className="block text-[11px] font-medium text-muted mb-1">
-                    Date de début (optionnel) :
+                    Date de début personnalisée (optionnel) :
                   </label>
                   <input
                     type="date"

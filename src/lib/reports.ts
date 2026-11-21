@@ -4,7 +4,6 @@ import { db } from "@/lib/db";
 import { studentSearchWhere } from "@/lib/search";
 import { invoiceStatus, invoiceTotals, statusMeta } from "@/lib/fees";
 import { formatDate, formatMonth } from "@/lib/format";
-import { generateMissingInvoices } from "@/lib/invoicing";
 
 export type ReportSummary = {
   totalDue: number;
@@ -161,9 +160,10 @@ export async function buildDataset(schoolId: number, sp: URLSearchParams): Promi
   }
 
   // ── 2. Élèves non payés / Impayés cumulés (Unpaid) ───────────────────────────
-  // Business rule: Shows all students with unpaid amounts up to the specified cut-off date (asOf/to).
-  // E.g., if student enrolled on 05/10 and admin filters on 10/11, their October and November unpaid
-  // balances appear seamlessly, along with exact days of delay.
+  // Business rule: Shows unpaid students up to a cut-off date (asOf/to).
+  // Window: Restricted by default to maximum 2 months (the selected month + 1 month before).
+  // E.g., if admin filters on 10/11, it fetches October and November unpaid invoices.
+  // It avoids pulling an entire 12-month backlog unless explicitly requested.
   if (type === "unpaid") {
     const asOfParam = sp.get("asOf") || sp.get("to");
     const asOfDate = parseDay(asOfParam, true) ?? new Date();
@@ -171,15 +171,24 @@ export async function buildDataset(schoolId: number, sp: URLSearchParams): Promi
     const fromParam = sp.get("since") || sp.get("from");
     const fromDay = parseDay(fromParam);
 
-    // Limit month: the 1st of the month of the asOfDate
-    const maxMonth = new Date(Date.UTC(asOfDate.getUTCFullYear(), asOfDate.getUTCMonth(), 1));
-    const minMonth = fromDay ? new Date(Date.UTC(fromDay.getUTCFullYear(), fromDay.getUTCMonth(), 1)) : undefined;
+    const monthsParam = sp.get("months") ?? "2";
 
-    // Ensure all missing monthly invoices up to asOfDate have been materialized
-    try {
-      await generateMissingInvoices(schoolId, asOfDate);
-    } catch {
-      // Non-blocking in case of concurrent execution
+    // Upper bound month: 1st of the month of the asOfDate
+    const maxMonth = new Date(Date.UTC(asOfDate.getUTCFullYear(), asOfDate.getUTCMonth(), 1));
+
+    // Lower bound month: default maximum 2 months (current + previous)
+    let minMonth: Date | undefined;
+    if (fromDay) {
+      minMonth = new Date(Date.UTC(fromDay.getUTCFullYear(), fromDay.getUTCMonth(), 1));
+    } else if (monthsParam === "1") {
+      minMonth = maxMonth;
+    } else if (monthsParam === "3") {
+      minMonth = new Date(Date.UTC(maxMonth.getUTCFullYear(), maxMonth.getUTCMonth() - 2, 1));
+    } else if (monthsParam === "all") {
+      minMonth = undefined; // all past months
+    } else {
+      // Default: maximum 2 months (mois en cours + mois précédent)
+      minMonth = new Date(Date.UTC(maxMonth.getUTCFullYear(), maxMonth.getUTCMonth() - 1, 1));
     }
 
     const invoices = await db.invoice.findMany({
@@ -203,7 +212,6 @@ export async function buildDataset(schoolId: number, sp: URLSearchParams): Promi
     const unpaidInvoices = invoices.filter((i) => invoiceStatus(i) !== "PAID");
 
     unpaidInvoices.sort((a, b) => {
-      // Primary: sort by oldest unpaid month first or student name
       const diff = a.student.lastName.localeCompare(b.student.lastName);
       if (diff !== 0) return diff;
       return a.month.getTime() - b.month.getTime();
@@ -218,7 +226,7 @@ export async function buildDataset(schoolId: number, sp: URLSearchParams): Promi
       const t = invoiceTotals(i);
       const status = invoiceStatus(i);
 
-      // Delay measured against the cut-off date or now (whichever is earlier or relevant)
+      // Delay measured against the cut-off date
       const diffMs = asOfDate.getTime() - i.dueDate.getTime();
       const lateDays = Math.floor(diffMs / DAY);
 
@@ -229,8 +237,6 @@ export async function buildDataset(schoolId: number, sp: URLSearchParams): Promi
       sumRemaining += t.remaining;
 
       const lastPayment = i.payments[0];
-
-      // Student registration date or first enrollment date
       const regDate = i.student.registeredAt ? formatDate(i.student.registeredAt) : "—";
 
       const subjectOrGroup = i.lines
@@ -264,12 +270,18 @@ export async function buildDataset(schoolId: number, sp: URLSearchParams): Promi
     const recoveryRate = sumDue > 0 ? Math.round((sumPaid / sumDue) * 1000) / 10 : 0;
     const uniqueStudents = new Set(unpaidInvoices.map((i) => i.studentId)).size;
 
+    const windowText = minMonth
+      ? minMonth.getTime() === maxMonth.getTime()
+        ? `Mois de ${formatMonth(maxMonth)} uniquement`
+        : `2 mois max (${formatMonth(minMonth)} & ${formatMonth(maxMonth)})`
+      : "Tout l'historique";
+
     return {
-      title: "Élèves non payés & impayés cumulés",
+      title: "Élèves non payés & impayés récents",
       subtitle: [
         groupLabel,
         `Arrêté au ${formatDate(asOfDate)}`,
-        fromDay ? `Depuis le ${formatDate(fromDay)}` : "Tous les mois antérieurs inclus",
+        windowText,
         `${uniqueStudents} élève(s) avec solde impayé`,
       ]
         .filter(Boolean)
