@@ -1,29 +1,25 @@
 /**
  * Règle métier partagée : le retard est calculé sur la DATE D'INSCRIPTION.
  *
- * - Échéance affichée = inscription + 5 jours (délai de grâce).
- * - Aucun retard affiché pendant les 5 premiers jours.
- * - À partir du 6e jour, on affiche le nombre TOTAL de jours écoulés
- *   depuis l'inscription (6, 7, 8, …), et il augmente d'un chaque jour.
- *
- * Exemple : inscription 19/11 → échéance 24/11
- *   24/11 = 0 j (à jour) · 25/11 = 6 j · 26/11 = 7 j · 27/11 = 8 j …
+ * - Aucun délai de grâce : inscription le 20/10 → 21/10 = 1 jour de retard.
+ * - Le compte est le nombre de jours calendaires (UTC) écoulés depuis
+ *   l'inscription, et il augmente d'un chaque jour (1, 2, 3, …).
  */
 const DAY = 86_400_000;
-export const GRACE_DAYS = 5;
+const startOfDay = (d: Date) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
 
 /** Ancre de facturation = date d'inscription la plus ancienne. */
 export function enrollmentAnchor(enrollments: { startedAt: Date }[]): Date | null {
   return enrollments.reduce<Date | null>((min, e) => (!min || e.startedAt < min ? e.startedAt : min), null);
 }
 
-/** Date d'échéance = date d'inscription + 5 jours. */
+/** Échéance = date d'inscription (le retard commence le lendemain). */
 export function dueDateFromEnrollment(start: Date): Date {
-  return new Date(start.getTime() + GRACE_DAYS * DAY);
+  return startOfDay(start);
 }
 
-/** Jours de retard affichés (0 pendant le délai de grâce, puis total depuis l'inscription). */
+/** Jours de retard = jours calendaires depuis l'inscription (0 le jour même). */
 export function lateDaysFromEnrollment(start: Date, asOf: Date): number {
-  const days = Math.floor((asOf.getTime() - start.getTime()) / DAY);
-  return days > GRACE_DAYS ? days : 0;
+  const days = Math.floor((startOfDay(asOf).getTime() - startOfDay(start).getTime()) / DAY);
+  return days > 0 ? days : 0;
 }

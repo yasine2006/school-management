@@ -105,7 +105,7 @@ export async function reminderRows(schoolId: number, month: Date): Promise<Remin
         : paid > 0
           ? "PARTIAL"
           : "UNPAID";
-    // Échéance = inscription + 5 j ; retard = jours depuis l'inscription à partir du 6e jour.
+    // Échéance = date d'inscription ; retard = jours calendaires depuis l'inscription (1 j dès le lendemain).
     const start = enrollmentAnchor(s.enrollments);
     const daysLate = remaining > 0 && start ? lateDaysFromEnrollment(start, now) : 0;
     const remindedAt = invoice ? (lastReminder.get(invoice.id) ?? null) : null;
@@ -137,7 +137,12 @@ export async function reminderRows(schoolId: number, month: Date): Promise<Remin
   });
 }
 
-export type RemindOptions = { studentIds?: number[]; onlyOverdue?: boolean };
+export type RemindOptions = {
+  studentIds?: number[];
+  onlyOverdue?: boolean;
+  /** Bouton manuel : permet de relancer à nouveau le même jour (le cron reste limité à une fois/jour). */
+  allowRepeat?: boolean;
+};
 
 export async function sendReminders(schoolId: number, month: Date, opts: RemindOptions = {}) {
   const rows = (await reminderRows(schoolId, month)).filter(
@@ -145,7 +150,7 @@ export async function sendReminders(schoolId: number, month: Date, opts: RemindO
       r.invoiceId !== null &&
       r.remaining > 0 &&
       r.userId !== null &&
-      !r.remindedToday &&
+      (opts.allowRepeat || !r.remindedToday) &&
       (!opts.studentIds || opts.studentIds.includes(r.studentId)) &&
       (!opts.onlyOverdue || r.daysLate > 0),
   );

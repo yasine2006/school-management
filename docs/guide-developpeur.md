@@ -14,7 +14,7 @@
 3. **Auth**: JWT HS256 فكوكي `session` (httpOnly, 7 أيام) + bcrypt. `src/proxy.ts` هو middleware ديال Next 16.
 4. **الصفحات server components بالافتراض**. `"use client"` غير فالفورمات/المكونات التفاعلية.
 5. **الكتابة كلها server actions** (`"use server"`) + Zod + `audit()` + `revalidatePath()`.
-6. **الفاتورة = شهر واحد لكل تلميذ**. سطر لكل inscription نشيطة. بلا prorata. الأجل هو 5 من الشهر.
+6. **الفاتورة = شهر واحد لكل تلميذ**. سطر لكل inscription نشيطة. بلا prorata. الأجل = تاريخ التسجيل، وال retard كيبدا من الغد (1 جوم).
 7. **الفلوس بـ`Prisma.Decimal`**، والتواريخ كلها **UTC**، والشهر دائما أول يوم ديال الشهر.
 8. **الـPrisma client lazy** عبر Proxy (`src/lib/db.ts`) باش البناء ما يطيحش بلا `DATABASE_URL`.
 9. **الـseed كيدمر الداتا**. فالإنتاج ممنوع إلا `ALLOW_SEED=1`.
@@ -349,7 +349,7 @@ Payment ─> InvoiceLine? (imputation par matière)
 
 - **فاتورة واحدة لكل تلميذ لكل شهر** (`studentId + month` unique).
 - `month` دائما **أول يوم ديال الشهر بـUTC** (`monthStart`).
-- `dueDate` = **5 من الشهر**.
+- `dueDate` = **تاريخ التسجيل** (`enrollmentAnchor` → `dueDateFromEnrollment`)؛ ما كاينش délai de grâce، والـretard كيتحسب بالأيام من تاريخ التسجيل (20/10 → 21/10 = 1 جوم).
 - **سطر واحد لكل inscription نشيطة** وقت الفاتورة. المجموع = مجموع السطور.
 - **بلا prorata**: حتى إلا سجل متأخر، كيخلص الشهر كامل.
 - `billableEnrollments` = `startedAt <= monthEnd`.
@@ -386,11 +386,12 @@ Payment ─> InvoiceLine? (imputation par matière)
   - invoice كاينة
   - `remaining > 0`
   - `userId` مرتبط
-  - ما تم إرسال اليوم (AuditLog `REMINDER` لنفس invoice)
+  - ما تم إرسال اليوم (AuditLog `REMINDER` لنفس invoice) — إلا بـ`allowRepeat` (الأزرار اليدوية) كيتعاد الإرسال فنفس النهار
   - `onlyOverdue` → `daysLate > 0`
 - الإرسال = **Notification in-app** + AuditLog. **ماشي email/SMS/WhatsApp حقيقي**.
 - WhatsApp = link `wa.me` فقط، ماكاينش إرسال أوتوماتيكي.
-- Cron يومي: `POST /api/cron/payment-reminders` (كل المدارس، الشهر الحالي، onlyOverdue).
+- الأزرار اليدوية فـ`/admin/reminders` كترسل **الشهر المعروض + الشهر اللي فات**، وكل نهار (عبر `relance()` فـ`actions.ts`).
+- Cron يومي: `POST /api/cron/payment-reminders` (كل المدارس، الشهر الحالي + اللي فات، onlyOverdue، مرة واحدة فالنهار).
 
 ### 7.4 Inscriptions (enrollment)
 

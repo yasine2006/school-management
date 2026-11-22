@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { firstOfMonth } from "@/lib/fees";
-import { monthKey } from "@/lib/invoicing";
+import { addMonths, monthKey } from "@/lib/invoicing";
 import { sendReminders } from "@/lib/reminders";
 
 export async function POST(req: Request) {
@@ -11,13 +11,17 @@ export async function POST(req: Request) {
   }
 
   const month = firstOfMonth();
+  const previous = addMonths(month, -1);
   const schools = await db.school.findMany({ select: { id: true } });
   let sent = 0;
   const skipped = 0;
 
   for (const school of schools) {
-    const count = await sendReminders(school.id, month, { onlyOverdue: true });
-    sent += count;
+    const [current, lastMonth] = await Promise.all([
+      sendReminders(school.id, month, { onlyOverdue: true }),
+      sendReminders(school.id, previous, { onlyOverdue: true }),
+    ]);
+    sent += current + lastMonth;
   }
 
   return Response.json({ ok: true, month: monthKey(month), sent, skipped });

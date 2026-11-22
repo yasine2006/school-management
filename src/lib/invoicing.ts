@@ -51,7 +51,7 @@ export async function ensureInvoiceForMonth(
   const active = billableEnrollments(enrollments, month);
   if (!active.length) return null;
 
-  // Échéance = date d'inscription + 5 jours (jamais avant l'inscription).
+  // Échéance = date d'inscription (pas de délai de grâce ; retard dès le lendemain).
   const start = enrollmentAnchor(active) ?? active[0].startedAt;
   const dueDate = dueDateFromEnrollment(start);
 

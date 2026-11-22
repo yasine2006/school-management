@@ -3,7 +3,7 @@ import Link from "next/link";
 import { BellRing, CheckCircle2, FileSpreadsheet, FileWarning, MessageCircle, Send } from "lucide-react";
 import { requireRole } from "@/lib/session";
 import { firstOfMonth, statusMeta } from "@/lib/fees";
-import { monthKey, parseMonthKey } from "@/lib/invoicing";
+import { addMonths, monthKey, parseMonthKey } from "@/lib/invoicing";
 import { reminderSummary } from "@/lib/reminders";
 import { formatDate, formatDH, formatMonth } from "@/lib/format";
 import { AutoForm } from "@/components/auto-form";
@@ -24,8 +24,15 @@ export default async function RemindersPage({
   const sp = await searchParams;
   const month = parseMonthKey(sp.month ?? "") ?? firstOfMonth();
   const key = monthKey(month);
+  const previous = addMonths(month, -1);
   const sent = Number(sp.sent ?? 0);
-  const s = await reminderSummary(schoolId, month);
+  const [s, prev] = await Promise.all([
+    reminderSummary(schoolId, month),
+    reminderSummary(schoolId, previous),
+  ]);
+  const overdue = (r: (typeof s.rows)[number]) =>
+    r.invoiceId !== null && r.userId !== null && r.remaining > 0 && r.daysLate > 0;
+  const relaunchable = s.rows.filter(overdue).length + prev.rows.filter(overdue).length;
 
   const monthLast = new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth() + 1, 0)).toISOString().slice(0, 10);
   const unpaidExport = `/api/reports?type=invoices&format=xlsx&unpaid=1&from=${key}-01&to=${monthLast}`;
@@ -51,10 +58,10 @@ export default async function RemindersPage({
             <AutoForm>
               <input type="month" name="month" defaultValue={key} className={selectCls} aria-label="Mois" />
             </AutoForm>
-            {s.sendable > 0 && (
+            {relaunchable > 0 && (
               <form action={remindAll.bind(null, key)}>
-                <button className={btnPrimary}>
-                  <BellRing size={15} /> Relancer les retardataires ({s.sendable})
+                <button className={btnPrimary} title="Impayés du mois affiché et du mois précédent — possible chaque jour">
+                  <BellRing size={15} /> Relancer les retardataires ({relaunchable})
                 </button>
               </form>
             )}
@@ -163,11 +170,10 @@ export default async function RemindersPage({
                             {r.remaining > 0 && r.userId && (
                               <form action={remindStudent.bind(null, r.studentId, key)}>
                                 <button
-                                  disabled={r.remindedToday}
-                                  className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-200 disabled:opacity-50"
-                                  title={r.remindedToday ? "Déjà relancé aujourd'hui" : "Envoyer une notification"}
+                                  className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-200"
+                                  title={r.remindedToday ? "Relancer à nouveau" : "Envoyer une notification"}
                                 >
-                                  <Send size={13} /> {r.remindedToday ? "Relancé" : "Notifier"}
+                                  <Send size={13} /> {r.remindedToday ? "Relancer" : "Notifier"}
                                 </button>
                               </form>
                             )}
@@ -215,9 +221,10 @@ export default async function RemindersPage({
       </Card>
 
       <p className="mt-4 text-xs text-muted">
-        Les rappels partent en <b>notification in-app</b> (élèves avec compte) et en <b>WhatsApp</b> au parent, une seule fois par
-        jour et par facture. Échéance : le <b>5</b> de chaque mois. Le cron <code>POST /api/cron/payment-reminders</code> relance
-        automatiquement les retards ({fmtDay(month)}).
+        Les rappels partent en <b>notification in-app</b> (élèves avec compte) et en <b>lien WhatsApp</b> au parent. Le retard est
+        compté depuis la date d&apos;inscription (<b>1 jour</b> dès le lendemain). Le bouton « Relancer » envoie chaque jour aux
+        impayés du mois affiché et du mois précédent ; le cron <code>POST /api/cron/payment-reminders</code> relance une fois par
+        jour ({fmtDay(month)}).
       </p>
     </>
   );

@@ -234,8 +234,8 @@ export async function buildDataset(schoolId: number, sp: URLSearchParams): Promi
 
     const DAY = 86_400_000;
 
-    // Règle métier : échéance = date d'inscription + 5 jours ; le retard est
-    // compté depuis l'inscription et affiché à partir du 6e jour (6, 7, 8, …).
+    // Règle métier : échéance = date d'inscription ; le retard est compté en
+    // jours calendaires depuis l'inscription (1 jour dès le lendemain).
     const effectiveDue = (baseDue: Date, enrollments: { startedAt: Date }[]) => {
       const start = enrollmentAnchor(enrollments);
       return start ? dueDateFromEnrollment(start) : baseDue;

@@ -591,12 +591,12 @@
         <thead><tr><th style="width:30%">Règle</th><th>Application dans la plateforme</th></tr></thead>
         <tbody>
           <tr><td><b>Mensualité</b></td><td>Une facture par élève et par mois. Chaque ligne correspond à une inscription active.</td></tr>
-          <tr><td><b>Échéance</b></td><td>Le 5 de chaque mois.</td></tr>
+          <tr><td><b>Échéance</b></td><td>La date d'inscription : le retard démarre le lendemain (1 jour = 1 jour de retard).</td></tr>
           <tr><td><b>Montant</b></td><td>Facturation au mois entier, sans prorata, même en cas d'inscription en cours de mois.</td></tr>
           <tr><td><b>Paiement par matière</b></td><td>Un encaissement peut être affecté à une matière précise ; le reçu conserve cette information.</td></tr>
           <tr><td><b>Retrait d'une matière</b></td><td>L'inscription est suspendue, jamais supprimée : l'historique et les factures restent intacts.</td></tr>
           <tr><td><b>Réactivation</b></td><td>L'élève reprend la même inscription, sans recréer de dossier.</td></tr>
-          <tr><td><b>Relances</b></td><td>Elles démarrent après 5 jours de retard, une seule fois par jour et par facture.</td></tr>
+          <tr><td><b>Relances</b></td><td>Dès le 1er jour de retard. Le bouton "Relancer" est disponible chaque jour pour le mois en cours et le mois précédent ; le cron automatique reste limité à une fois par jour et par facture.</td></tr>
           <tr><td><b>Inscriptions</b></td><td>Ouvertes uniquement pendant la période définie par la direction ; la fermeture peut être anticipée.</td></tr>
         </tbody>
       </table>
@@ -971,12 +971,12 @@
         <thead><tr><th style="width:28%">القاعدة</th><th>التطبيق في المنصة</th></tr></thead>
         <tbody>
           <tr><td><b>الواجب الشهري</b></td><td>فاتورة واحدة لكل تلميذ شهريًا، بسطر لكل تسجيل نشط.</td></tr>
-          <tr><td><b>تاريخ الاستحقاق</b></td><td>الخامس من كل شهر.</td></tr>
+          <tr><td><b>تاريخ الاستحقاق</b></td><td>تاريخ التسجيل؛ التأخر كيبدا من الغد (1 يوم = 1 يوم تأخير).</td></tr>
           <tr><td><b>المبلغ</b></td><td>فوترة الشهر كاملًا، دون تناسب جزئي، حتى في حالة التسجيل وسط الشهر.</td></tr>
           <tr><td><b>الأداء حسب المادة</b></td><td>يمكن تخصيص الأداء لمادة معيّنة، ويحفظ الوصل هذه المعلومة.</td></tr>
           <tr><td><b>سحب مادة</b></td><td>يُوقَف التسجيل ولا يُحذف أبدًا: يبقى التاريخ والفواتير محفوظين.</td></tr>
           <tr><td><b>إعادة التفعيل</b></td><td>يستأنف التلميذ نفس التسجيل دون إنشاء ملف جديد.</td></tr>
-          <tr><td><b>التذكيرات</b></td><td>تبدأ بعد خمسة أيام من التأخر، مرة واحدة يوميًا لكل فاتورة.</td></tr>
+          <tr><td><b>التذكيرات</b></td><td>تبدأ من أول يوم تأخير. زر "Relancer" متاح كل نهار للشهر الحالي والشهر اللي فات؛ الـcron التلقائي مرة واحدة فالنهار لكل فاتورة.</td></tr>
           <tr><td><b>التسجيلات</b></td><td>مفتوحة فقط خلال الفترة التي تحددها الإدارة، ويمكن إغلاقها قبل موعدها.</td></tr>
         </tbody>
       </table>
