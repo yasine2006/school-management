@@ -390,7 +390,10 @@ Payment ─> InvoiceLine? (imputation par matière)
   - `onlyOverdue` → `daysLate > 0`
 - الإرسال = **Notification in-app** + AuditLog. **ماشي email/SMS/WhatsApp حقيقي**.
 - WhatsApp = link `wa.me` فقط، ماكاينش إرسال أوتوماتيكي.
-- الأزرار اليدوية فـ`/admin/reminders` كترسل **الشهر المعروض + الشهر اللي فات**، وكل نهار (عبر `relance()` فـ`actions.ts`).
+- الأزرار اليدوية فـ`/admin/reminders`:
+  - **زر «Relancer échéances du jour»** (`remindDueToday`): كيرسل غير للشهر المعروض (« gha f dak chher ») وللتلاميذ اللي الأجل الشهري ديالهم (fin de mois d'inscription) وصل حتى لليوم (1 حتى لليوم الفعلي).
+  - **زر «Tous les retardataires»** (`remindAll`): كيرسل للشهر المعروض + الشهر اللي فات.
+- فلتر تفاعلي متجدد كل يوم: كيعرض تلقائياً التلاميذ الواصلين للأجل حتى لليوم الحسابي (`filter=due_today`).
 - Cron يومي: `POST /api/cron/payment-reminders` (كل المدارس، الشهر الحالي + اللي فات، onlyOverdue، مرة واحدة فالنهار).
 
 ### 7.4 Inscriptions (enrollment)

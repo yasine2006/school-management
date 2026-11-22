@@ -4,7 +4,7 @@ import { db } from "@/lib/db";
 import { invoiceTotals } from "@/lib/fees";
 import { formatDH, formatMonth } from "@/lib/format";
 import { billableEnrollments, monthKey, monthStart } from "@/lib/invoicing";
-import { enrollmentAnchor, lateDaysFromEnrollment } from "@/lib/late-days";
+import { enrollmentAnchor, isDueAsOf, lateDaysForMonth, monthlyDueDate } from "@/lib/late-days";
 
 export const REMINDER_TITLE = "Rappel de paiement";
 
@@ -26,6 +26,9 @@ export type ReminderRow = {
   remindedAt: Date | null;
   remindedToday: boolean;
   waHref: string | null;
+  enrollmentStart: Date | null;
+  dueDate: Date | null;
+  isDueAsOfToday: boolean;
 };
 
 const startOfDay = (d = new Date()) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
@@ -105,9 +108,12 @@ export async function reminderRows(schoolId: number, month: Date): Promise<Remin
         : paid > 0
           ? "PARTIAL"
           : "UNPAID";
-    // Échéance = date d'inscription ; retard = jours calendaires depuis l'inscription (1 j dès le lendemain).
+    // Échéance = fin du mois d'inscription (anniversaire mensuel).
+    // Retard = jours calendaires écoulés depuis cette échéance dans ce mois.
     const start = enrollmentAnchor(s.enrollments);
-    const daysLate = remaining > 0 && start ? lateDaysFromEnrollment(start, now) : 0;
+    const dueDate = start ? monthlyDueDate(start, month) : (invoice?.dueDate ?? null);
+    const isDueAsOfToday = start ? isDueAsOf(start, month, now) : true;
+    const daysLate = remaining > 0 && start ? lateDaysForMonth(start, month, now) : 0;
     const remindedAt = invoice ? (lastReminder.get(invoice.id) ?? null) : null;
     const phone = normalizePhone(s.parentPhone);
 
@@ -126,6 +132,9 @@ export async function reminderRows(schoolId: number, month: Date): Promise<Remin
       daysLate,
       remindedAt,
       remindedToday: invoice ? today.has(invoice.id) : false,
+      enrollmentStart: start,
+      dueDate,
+      isDueAsOfToday,
     };
 
     return {
@@ -142,6 +151,8 @@ export type RemindOptions = {
   onlyOverdue?: boolean;
   /** Bouton manuel : permet de relancer à nouveau le même jour (le cron reste limité à une fois/jour). */
   allowRepeat?: boolean;
+  /** Relance ciblée : uniquement les élèves échus à ce jour dans ce mois (fin de mois d'inscription <= aujourd'hui). */
+  onlyDueAsOfToday?: boolean;
 };
 
 export async function sendReminders(schoolId: number, month: Date, opts: RemindOptions = {}) {
@@ -152,7 +163,8 @@ export async function sendReminders(schoolId: number, month: Date, opts: RemindO
       r.userId !== null &&
       (opts.allowRepeat || !r.remindedToday) &&
       (!opts.studentIds || opts.studentIds.includes(r.studentId)) &&
-      (!opts.onlyOverdue || r.daysLate > 0),
+      (!opts.onlyOverdue || r.daysLate > 0) &&
+      (!opts.onlyDueAsOfToday || r.isDueAsOfToday),
   );
   if (!rows.length) return 0;
 
@@ -184,6 +196,7 @@ export async function sendReminders(schoolId: number, month: Date, opts: RemindO
 export async function reminderSummary(schoolId: number, month = monthStart(new Date())) {
   const rows = await reminderRows(schoolId, month);
   const unpaid = rows.filter((r) => r.remaining > 0);
+  const dueAsOfToday = unpaid.filter((r) => r.isDueAsOfToday);
   return {
     month,
     rows,
@@ -194,5 +207,8 @@ export async function reminderSummary(schoolId: number, month = monthStart(new D
     late: unpaid.filter((r) => r.daysLate > 0).length,
     missing: rows.filter((r) => r.status === "MISSING").length,
     sendable: unpaid.filter((r) => r.invoiceId !== null && r.userId !== null && !r.remindedToday).length,
+    dueAsOfTodayCount: dueAsOfToday.length,
+    dueAsOfTodayRemaining: dueAsOfToday.reduce((s, r) => s + r.remaining, 0),
+    dueAsOfTodaySendable: dueAsOfToday.filter((r) => r.invoiceId !== null && r.userId !== null).length,
   };
 }

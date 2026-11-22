@@ -1,7 +1,7 @@
 import "server-only";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { dueDateFromEnrollment, enrollmentAnchor } from "@/lib/late-days";
+import { dueDateFromEnrollment, enrollmentAnchor, monthlyDueDate } from "@/lib/late-days";
 
 export const MAX_BILLING_MONTHS = 12;
 
@@ -51,9 +51,9 @@ export async function ensureInvoiceForMonth(
   const active = billableEnrollments(enrollments, month);
   if (!active.length) return null;
 
-  // Échéance = date d'inscription (pas de délai de grâce ; retard dès le lendemain).
+  // Échéance = fin du mois d'inscription (anniversaire mensuel d'inscription).
   const start = enrollmentAnchor(active) ?? active[0].startedAt;
-  const dueDate = dueDateFromEnrollment(start);
+  const dueDate = monthlyDueDate(start, month);
 
   return tx.invoice
     .create({

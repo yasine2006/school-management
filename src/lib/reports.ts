@@ -4,7 +4,7 @@ import { db } from "@/lib/db";
 import { studentSearchWhere } from "@/lib/search";
 import { invoiceStatus, invoiceTotals, statusMeta } from "@/lib/fees";
 import { formatDate, formatMonth } from "@/lib/format";
-import { dueDateFromEnrollment, enrollmentAnchor, lateDaysFromEnrollment } from "@/lib/late-days";
+import { dueDateFromEnrollment, enrollmentAnchor, lateDaysForMonth, lateDaysFromEnrollment, monthlyDueDate } from "@/lib/late-days";
 
 export type ReportSummary = {
   totalDue: number;
@@ -234,15 +234,16 @@ export async function buildDataset(schoolId: number, sp: URLSearchParams): Promi
 
     const DAY = 86_400_000;
 
-    // Règle métier : échéance = date d'inscription ; le retard est compté en
-    // jours calendaires depuis l'inscription (1 jour dès le lendemain).
-    const effectiveDue = (baseDue: Date, enrollments: { startedAt: Date }[]) => {
+    // Règle métier : échéance = fin du mois d'inscription (anniversaire mensuel) ;
+    // le retard est compté en jours calendaires depuis cette échéance mensuelle.
+    const effectiveDue = (baseDue: Date, enrollments: { startedAt: Date }[], month?: Date) => {
       const start = enrollmentAnchor(enrollments);
-      return start ? dueDateFromEnrollment(start) : baseDue;
+      return start ? (month ? monthlyDueDate(start, month) : dueDateFromEnrollment(start)) : baseDue;
     };
-    const lateOf = (baseDue: Date, enrollments: { startedAt: Date }[], fallback?: Date) => {
+    const lateOf = (baseDue: Date, enrollments: { startedAt: Date }[], fallback?: Date, month?: Date) => {
       const start = enrollmentAnchor(enrollments) ?? fallback ?? null;
-      return start ? lateDaysFromEnrollment(start, asOfDate) : Math.floor((asOfDate.getTime() - baseDue.getTime()) / DAY);
+      if (!start) return Math.max(0, Math.floor((asOfDate.getTime() - baseDue.getTime()) / DAY));
+      return month ? lateDaysForMonth(start, month, asOfDate) : lateDaysFromEnrollment(start, asOfDate);
     };
 
     const fallbackDue = new Date(Date.UTC(maxMonth.getUTCFullYear(), maxMonth.getUTCMonth(), 5));
@@ -275,9 +276,9 @@ export async function buildDataset(schoolId: number, sp: URLSearchParams): Promi
         // No invoice in the window → MISSING, counted with expected amount (like Relances),
         // but ONLY once the enrollment + 5 days grace period has actually elapsed.
         if (!s.invoices.length && expected > 0) {
-          const due = effectiveDue(fallbackDue, s.enrollments);
+          const due = effectiveDue(fallbackDue, s.enrollments, maxMonth);
           if (due.getTime() <= asOfDate.getTime()) {
-            const lateDays = lateOf(fallbackDue, s.enrollments, s.registeredAt);
+            const lateDays = lateOf(fallbackDue, s.enrollments, s.registeredAt, maxMonth);
             entries.push({
               studentId: s.id,
               name: `${s.lastName} ${s.firstName}`,
@@ -301,8 +302,8 @@ export async function buildDataset(schoolId: number, sp: URLSearchParams): Promi
       for (const i of unpaidInvoices) {
         const t = invoiceTotals(i);
         const status = invoiceStatus(i);
-        const due = effectiveDue(i.dueDate, s.enrollments);
-        const lateDays = lateOf(i.dueDate, s.enrollments, s.registeredAt);
+        const due = effectiveDue(i.dueDate, s.enrollments, i.month);
+        const lateDays = lateOf(i.dueDate, s.enrollments, s.registeredAt, i.month);
         const subjectOrGroup =
           i.lines.map((l) => l.enrollment?.group?.name ?? l.label).filter(Boolean).join(", ") || allGroups;
         const lastPayment = i.payments[0];

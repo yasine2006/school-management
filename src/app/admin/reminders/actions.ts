@@ -38,3 +38,20 @@ export async function remindAll(key: string) {
   revalidatePath("/admin", "layout");
   redirect(`/admin/reminders?month=${monthKey(month)}&sent=${sent}`);
 }
+
+/**
+ * Relance du jour : uniquement les élèves dont l'échéance (fin de mois d'inscription)
+ * est échue jusqu'au jour actuel, UNIQUEMENT dans le mois sélectionné (« gha f dak chher »).
+ */
+export async function remindDueToday(key: string) {
+  const session = await requireRole("ADMIN");
+  const month = parseMonthKey(key);
+  if (!month) return;
+
+  const sent = await sendReminders(session.schoolId, month, {
+    onlyDueAsOfToday: true,
+    allowRepeat: true,
+  });
+  revalidatePath("/admin", "layout");
+  redirect(`/admin/reminders?month=${monthKey(month)}&filter=due_today&sent=${sent}`);
+}

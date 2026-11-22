@@ -1,6 +1,17 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { BellRing, CheckCircle2, FileSpreadsheet, FileWarning, MessageCircle, Send } from "lucide-react";
+import {
+  BellRing,
+  CalendarClock,
+  CheckCircle2,
+  Clock,
+  FileSpreadsheet,
+  FileWarning,
+  Filter,
+  MessageCircle,
+  Send,
+  Users,
+} from "lucide-react";
 import { requireRole } from "@/lib/session";
 import { firstOfMonth, statusMeta } from "@/lib/fees";
 import { addMonths, monthKey, parseMonthKey } from "@/lib/invoicing";
@@ -9,7 +20,7 @@ import { formatDate, formatDH, formatMonth } from "@/lib/format";
 import { AutoForm } from "@/components/auto-form";
 import { Avatar, Badge, btnGhost, btnPrimary, Card, PageHeader, selectCls, td, th } from "@/components/ui";
 import { generateMonthlyInvoices } from "../invoices/actions";
-import { remindAll, remindStudent } from "./actions";
+import { remindAll, remindDueToday, remindStudent } from "./actions";
 
 export const metadata: Metadata = { title: "Relances & impayés" };
 
@@ -18,7 +29,7 @@ const fmtDay = (d: Date) => new Intl.DateTimeFormat("fr-FR", { timeZone: "UTC", 
 export default async function RemindersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ month?: string; sent?: string }>;
+  searchParams: Promise<{ month?: string; sent?: string; filter?: string }>;
 }) {
   const { schoolId } = await requireRole("ADMIN");
   const sp = await searchParams;
@@ -30,18 +41,37 @@ export default async function RemindersPage({
     reminderSummary(schoolId, month),
     reminderSummary(schoolId, previous),
   ]);
+
+  const now = new Date();
+  const isCurrentMonth = monthKey(month) === monthKey(now);
+  const todayDay = now.getUTCDate();
+  const daysInMonth = new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth() + 1, 0)).getUTCDate();
+  const dayLimit = isCurrentMonth ? todayDay : (month.getTime() < now.getTime() ? daysInMonth : 0);
+
   const overdue = (r: (typeof s.rows)[number]) =>
     r.invoiceId !== null && r.userId !== null && r.remaining > 0 && r.daysLate > 0;
   const relaunchable = s.rows.filter(overdue).length + prev.rows.filter(overdue).length;
 
+  const currentFilter = sp.filter ?? "due_today";
+
   const monthLast = new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth() + 1, 0)).toISOString().slice(0, 10);
   const unpaidExport = `/api/reports?type=invoices&format=xlsx&unpaid=1&from=${key}-01&to=${monthLast}`;
 
-  const rows = [...s.rows].sort((a, b) => {
+  const allRowsSorted = [...s.rows].sort((a, b) => {
     const aPaid = a.status === "PAID" ? 1 : 0;
     const bPaid = b.status === "PAID" ? 1 : 0;
     if (aPaid !== bPaid) return aPaid - bPaid;
     return b.remaining - a.remaining;
+  });
+
+  const displayedRows = allRowsSorted.filter((r) => {
+    if (currentFilter === "due_today") {
+      return r.remaining > 0 && r.isDueAsOfToday;
+    }
+    if (currentFilter === "late") {
+      return r.remaining > 0 && r.daysLate > 0;
+    }
+    return true;
   });
 
   return (
@@ -50,7 +80,8 @@ export default async function RemindersPage({
         title="Relances & impayés"
         subtitle={
           <>
-            Suivi des paiements de <b className="capitalize text-ink">{formatMonth(month)}</b> — {s.upToDate} élève(s) à jour, {s.late} en retard.
+            Suivi des paiements de <b className="capitalize text-ink">{formatMonth(month)}</b> — {s.upToDate} élève(s) à jour,{" "}
+            <b className="text-amber-700">{s.dueAsOfTodayCount} échu(s) à ce jour (1 au {dayLimit})</b>.
           </>
         }
         action={
@@ -58,13 +89,26 @@ export default async function RemindersPage({
             <AutoForm>
               <input type="month" name="month" defaultValue={key} className={selectCls} aria-label="Mois" />
             </AutoForm>
-            {relaunchable > 0 && (
-              <form action={remindAll.bind(null, key)}>
-                <button className={btnPrimary} title="Impayés du mois affiché et du mois précédent — possible chaque jour">
-                  <BellRing size={15} /> Relancer les retardataires ({relaunchable})
+
+            {s.dueAsOfTodaySendable > 0 && (
+              <form action={remindDueToday.bind(null, key)}>
+                <button
+                  className={btnPrimary}
+                  title={`Relancer uniquement les impayés du 1er au ${dayLimit} ${formatMonth(month)} (uniquement ce mois)`}
+                >
+                  <CalendarClock size={15} /> Relancer échéances du jour ({s.dueAsOfTodaySendable})
                 </button>
               </form>
             )}
+
+            {relaunchable > 0 && (
+              <form action={remindAll.bind(null, key)}>
+                <button className={btnGhost} title="Impayés du mois affiché et du mois précédent">
+                  <BellRing size={15} /> Tous les retardataires ({relaunchable})
+                </button>
+              </form>
+            )}
+
             {s.missing > 0 && (
               <form action={generateMonthlyInvoices}>
                 <button className={btnGhost}>
@@ -72,6 +116,7 @@ export default async function RemindersPage({
                 </button>
               </form>
             )}
+
             <a href={unpaidExport} className={btnGhost}>
               <FileSpreadsheet size={15} /> Impayés Excel
             </a>
@@ -87,10 +132,30 @@ export default async function RemindersPage({
 
       <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {[
-          { label: "Encaissé ce mois", value: formatDH(s.paid), hint: `sur ${formatDH(s.due)}`, tone: "text-emerald-600" },
-          { label: "Reste à encaisser", value: formatDH(s.remaining), hint: `${s.rows.filter((r) => r.remaining > 0).length} élève(s)`, tone: "text-rose-600" },
-          { label: "À jour", value: String(s.upToDate), hint: "factures soldées", tone: "text-emerald-600" },
-          { label: "En retard", value: String(s.late), hint: `dont ${s.missing} sans facture`, tone: "text-amber-600" },
+          {
+            label: "Encaissé ce mois",
+            value: formatDH(s.paid),
+            hint: `sur ${formatDH(s.due)}`,
+            tone: "text-emerald-600",
+          },
+          {
+            label: `Échus à ce jour (1 au ${dayLimit})`,
+            value: formatDH(s.dueAsOfTodayRemaining),
+            hint: `${s.dueAsOfTodayCount} élève(s) redevable(s)`,
+            tone: "text-amber-600",
+          },
+          {
+            label: "Reste total du mois",
+            value: formatDH(s.remaining),
+            hint: `${s.rows.filter((r) => r.remaining > 0).length} élève(s)`,
+            tone: "text-rose-600",
+          },
+          {
+            label: "À jour",
+            value: String(s.upToDate),
+            hint: "factures soldées",
+            tone: "text-emerald-600",
+          },
         ].map((c) => (
           <Card key={c.label} className="p-5">
             <p className="text-xs font-medium uppercase tracking-wide text-muted">{c.label}</p>
@@ -101,11 +166,85 @@ export default async function RemindersPage({
       </div>
 
       <Card className="overflow-hidden">
+        {/* Barre de filtres dynamiques (updatable chaque jour) */}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line bg-slate-50/70 px-4 py-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Link
+              href={`/admin/reminders?month=${key}&filter=due_today`}
+              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                currentFilter === "due_today"
+                  ? "bg-brand-600 text-white shadow-sm"
+                  : "border border-line bg-white text-slate-700 hover:bg-slate-100"
+              }`}
+              title="Élèves dont le cycle mensuel est échu au jour d'aujourd'hui dans ce mois"
+            >
+              <Clock size={14} />
+              Échéances à ce jour (1 au {dayLimit})
+              <span
+                className={`ml-1 rounded-full px-1.5 py-0.5 text-[10px] ${
+                  currentFilter === "due_today" ? "bg-white/20 text-white" : "bg-amber-100 font-bold text-amber-800"
+                }`}
+              >
+                {s.dueAsOfTodayCount}
+              </span>
+            </Link>
+
+            <Link
+              href={`/admin/reminders?month=${key}&filter=all`}
+              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                currentFilter === "all"
+                  ? "bg-brand-600 text-white shadow-sm"
+                  : "border border-line bg-white text-slate-700 hover:bg-slate-100"
+              }`}
+            >
+              <Users size={14} />
+              Tous les élèves
+              <span
+                className={`ml-1 rounded-full px-1.5 py-0.5 text-[10px] ${
+                  currentFilter === "all" ? "bg-white/20 text-white" : "bg-slate-100 text-slate-600"
+                }`}
+              >
+                {s.rows.length}
+              </span>
+            </Link>
+
+            <Link
+              href={`/admin/reminders?month=${key}&filter=late`}
+              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                currentFilter === "late"
+                  ? "bg-brand-600 text-white shadow-sm"
+                  : "border border-line bg-white text-slate-700 hover:bg-slate-100"
+              }`}
+            >
+              <Filter size={14} />
+              En retard strict
+              <span
+                className={`ml-1 rounded-full px-1.5 py-0.5 text-[10px] ${
+                  currentFilter === "late" ? "bg-white/20 text-white" : "bg-rose-100 font-bold text-rose-800"
+                }`}
+              >
+                {s.late}
+              </span>
+            </Link>
+          </div>
+
+          <div className="text-xs text-muted">
+            {currentFilter === "due_today" && (
+              <span>
+                Filtre actif : <b className="text-ink">impayés échus du 1er au {dayLimit} {formatMonth(month)}</b>
+              </span>
+            )}
+            {currentFilter === "all" && <span>Affichage de tous les élèves</span>}
+            {currentFilter === "late" && <span>Filtre actif : retardataires uniquement (&gt; 0 jour)</span>}
+          </div>
+        </div>
+
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="border-b border-line bg-slate-50/70">
               <tr>
                 <th className={th}>Élève</th>
+                <th className={th}>Échéance mensuelle</th>
                 <th className={th}>Statut</th>
                 <th className={`${th} text-right`}>Dû</th>
                 <th className={`${th} text-right`}>Reste</th>
@@ -115,7 +254,7 @@ export default async function RemindersPage({
               </tr>
             </thead>
             <tbody className="divide-y divide-line">
-              {rows.map((r) => {
+              {displayedRows.map((r) => {
                 const meta = r.status === "MISSING" ? null : statusMeta[r.status];
                 const full = `${r.firstName} ${r.lastName}`;
                 return (
@@ -135,6 +274,20 @@ export default async function RemindersPage({
                       </span>
                     </td>
                     <td className={td}>
+                      {r.dueDate ? (
+                        <div>
+                          <span className="font-medium text-ink">{fmtDay(r.dueDate)}</span>
+                          {r.enrollmentStart && (
+                            <span className="block text-[11px] text-muted">
+                              Inscrit le {fmtDay(r.enrollmentStart)}
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-muted">—</span>
+                      )}
+                    </td>
+                    <td className={td}>
                       {meta ? <Badge tone={meta.tone}>{meta.label}</Badge> : <Badge tone="gray">Sans facture</Badge>}
                     </td>
                     <td className={`${td} text-right`}>{formatDH(r.due)}</td>
@@ -142,12 +295,14 @@ export default async function RemindersPage({
                     <td className={td}>
                       {r.remaining > 0 ? (
                         r.daysLate > 0 ? (
-                          <span className="text-xs font-medium text-rose-600">{r.daysLate} j</span>
+                          <span className="text-xs font-semibold text-rose-600">{r.daysLate} j</span>
+                        ) : r.isDueAsOfToday ? (
+                          <span className="text-xs font-medium text-amber-600">Échéance aujourd&apos;hui</span>
                         ) : (
-                          <span className="text-xs text-muted">À échéance</span>
+                          <span className="text-xs text-muted">Échéance le {r.dueDate ? fmtDay(r.dueDate) : "—"}</span>
                         )
                       ) : (
-                        <span className="text-xs text-muted">—</span>
+                        <span className="text-xs text-emerald-600 font-medium">Réglé</span>
                       )}
                     </td>
                     <td className={td}>
@@ -208,10 +363,14 @@ export default async function RemindersPage({
                   </tr>
                 );
               })}
-              {!rows.length && (
+              {!displayedRows.length && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-sm text-muted">
-                    Aucun élève actif pour {formatMonth(month)}.
+                  <td colSpan={8} className="px-4 py-12 text-center text-sm text-muted">
+                    {currentFilter === "due_today"
+                      ? `Aucun élève en attente de paiement pour les échéances du 1er au ${dayLimit} ${formatMonth(month)}.`
+                      : currentFilter === "late"
+                        ? `Aucun élève en retard pour ${formatMonth(month)}.`
+                        : `Aucun élève actif pour ${formatMonth(month)}.`}
                   </td>
                 </tr>
               )}
@@ -221,10 +380,9 @@ export default async function RemindersPage({
       </Card>
 
       <p className="mt-4 text-xs text-muted">
-        Les rappels partent en <b>notification in-app</b> (élèves avec compte) et en <b>lien WhatsApp</b> au parent. Le retard est
-        compté depuis la date d&apos;inscription (<b>1 jour</b> dès le lendemain). Le bouton « Relancer » envoie chaque jour aux
-        impayés du mois affiché et du mois précédent ; le cron <code>POST /api/cron/payment-reminders</code> relance une fois par
-        jour ({fmtDay(month)}).
+        Les rappels partent en <b>notification in-app</b> (élèves avec compte) et en <b>lien WhatsApp</b> au parent. Le cycle mensuel
+        est basé sur le jour d&apos;inscription de l&apos;élève (<b>fin de mois d&apos;inscription</b>). Le bouton « Relancer échéances du jour »
+        cible <b>uniquement le mois affiché</b> pour les élèves dont l&apos;échéance est atteinte jusqu&apos;à aujourd&apos;hui (du 1er au {dayLimit}).
       </p>
     </>
   );
